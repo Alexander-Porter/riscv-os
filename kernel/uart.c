@@ -21,3 +21,25 @@ void uart_puts(const char *s) {
     uart_putc(*s++);
   }
 }
+
+void panic(const char *s) {
+  uart_puts("panic: ");
+  uart_puts(s);
+  uart_puts("\n");
+  while(1);
+}
+
+void uart_getstr(char *buf, int max) {
+  int i = 0;
+  while(i + 1 < max) {
+    int c = uart_getc();
+    if(c == -1)
+      continue;
+    if(c == '\r')
+      break;
+    uart_putc(c);
+    buf[i++] = c;
+  }
+  buf[i] = 0;
+  uart_putc('\n');
+}
