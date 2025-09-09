@@ -1,4 +1,4 @@
-
+#include "global_func.h"
 void main();
 
 
@@ -9,6 +9,7 @@ __attribute__ ((aligned (16))) char stack0[4096];
 void
 start()
 {
-
+uart_putc('T'); // 输出字符S表示启动
+uart_puts("Hello, world!\n");
 }
 
