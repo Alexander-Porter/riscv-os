@@ -6,10 +6,20 @@ QEMU = qemu-system-riscv64
 # Directories and files
 KERNEL_ELF = kernel.elf
 KERNEL_BIN = kernel.bin
-ENTRY = kernel/entry.o
-START = kernel/start.o
-UART = kernel/uart.c
 LINKER_SCRIPT = kernel/kernel.ld
+
+# Source files
+SRC = \
+	kernel/entry.S \
+	kernel/start.c \
+	kernel/uart.c \
+	kernel/console.c \
+	kernel/console.c \
+	kernel/main.c
+
+# Object files
+OBJ = $(SRC:.c=.o)
+OBJ := $(OBJ:.S=.o)
 
 # Compilation flags
 CFLAGS = -Wall -O2 -ffreestanding -nostdlib -mcmodel=medany
@@ -22,12 +32,19 @@ all: $(KERNEL_BIN)
 $(KERNEL_BIN): $(KERNEL_ELF)
 	$(OBJCOPY) -O binary $< $@
 
-$(KERNEL_ELF): $(ENTRY) $(START) $(UART)
+$(KERNEL_ELF): $(OBJ)
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^
+
+# Compile source files
+%.o: %.c
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+%.o: %.S
+	$(CC) $(CFLAGS) -c -o $@ $<
 
 # Clean up
 clean:
-	rm -f $(KERNEL_ELF) $(KERNEL_BIN)
+	rm -f $(KERNEL_ELF) $(KERNEL_BIN) $(OBJ)
 
 # Run QEMU
 qemu: $(KERNEL_BIN)
