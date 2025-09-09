@@ -15,7 +15,8 @@ SRC = \
 	kernel/uart.c \
 	kernel/console.c \
 	kernel/console.c \
-	kernel/main.c
+	kernel/main.c \
+	kernel/printf.c
 
 # Object files
 OBJ = $(SRC:.c=.o)
