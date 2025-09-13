@@ -6,9 +6,8 @@ __attribute__((aligned(16))) char stack0[4096];
 // entry.S jumps here in S-mode on stack0.
 void start()
 {
-    // 设置S模式的中断处理
-    trapinithart();
-    
-    // 调用内核主函数
+    // a C-language function needs a stack. a lot of C functions are called before paging is enabled.
+    // so we need to set up a stack in entry.S.
+    // after paging is enabled, we can set up a new stack for the kernel.
     main();
 }

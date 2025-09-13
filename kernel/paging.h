@@ -103,6 +103,16 @@ static inline void w_satp(uint64 x) {
   asm volatile("csrw satp, %0" : : "r" (x));
 }
 
+static inline void w_sscratch(uint64 x) {
+  asm volatile("csrw sscratch, %0" : : "r" (x));
+}
+
+static inline uint64 r_time() {
+  uint64 x;
+  asm volatile("csrr %0, time" : "=r" (x));
+  return x;
+}
+
 // 刷新TLB的宏
 static inline void sfence_vma() {
   // a zero rs1 means flush all entries.

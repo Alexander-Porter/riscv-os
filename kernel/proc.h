@@ -2,13 +2,9 @@
 #define __PROC_H
 
 #include "types.h"
+#include "paging.h"
 
-// Per-CPU state.
-struct cpu {
-  // To be filled in later labs
-};
-
-// Saved registers for kernel context switches.
+// 内核上下文切换时保存的寄存器
 struct context {
   uint64 ra;
   uint64 sp;
@@ -28,20 +24,14 @@ struct context {
   uint64 s11;
 };
 
-// Per-process state
-struct proc {
-  // To be filled in later labs
-};
-
-// 进程中断时保存的寄存器现场
-// 当一个进程在用户态或内核态发生中断/异常时，
-// 硬件或软件会把这些寄存器保到栈上。
+// 用户态陷入内核时，保存的用户寄存器和上下文信息
+// 这个结构体需要和kernelvec.S中的寄存器保存/恢复顺序严格对应
 struct trapframe {
-  /*   0 */ uint64 kernel_satp;   // 内核页表的satp
-  /*   8 */ uint64 kernel_sp;     // 内核栈的栈顶指针
-  /*  16 */ uint64 kernel_trap;   // kerneltrap()函数的地址
-  /*  24 */ uint64 epc;           // 发生中断/异常时的指令地址
-  /*  32 */ uint64 kernel_hartid; // 当前CPU的ID
+  /*   0 */ uint64 kernel_satp;   // 内核页表
+  /*   8 */ uint64 kernel_sp;     // 进程内核栈顶
+  /*  16 */ uint64 kernel_trap;   // usertrap()函数的地址
+  /*  24 */ uint64 epc;           // 保存的用户PC
+  /*  32 */ uint64 kernel_hartid; // a new field could be added here
   /*  40 */ uint64 ra;
   /*  48 */ uint64 sp;
   /*  56 */ uint64 gp;
@@ -73,6 +63,21 @@ struct trapframe {
   /* 264 */ uint64 t4;
   /* 272 */ uint64 t5;
   /* 280 */ uint64 t6;
+};
+
+// 进程状态
+enum procstate { UNUSED, USED, SLEEPING, RUNNABLE, RUNNING, ZOMBIE };
+
+// 进程控制块 (PCB)
+struct proc {
+  enum procstate state;        // 进程状态
+  int pid;                     // 进程ID
+  uint64 kstack;               // 进程的内核栈地址
+  uint64 sz;                   // 进程内存大小 (bytes)
+  pagetable_t pagetable;       // 用户页表
+  struct trapframe *trapframe; // 指向trapframe页
+  struct context context;      // 上下文切换时保存的寄存器
+  char name[16];               // 进程名 (用于调试)
 };
 
 #endif // __PROC_H

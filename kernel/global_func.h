@@ -29,5 +29,9 @@ void kvm_init_hart();
 void trapinithart(void);
 void kerneltrap();
 
+// proc.c
+void proc_init(void);
+void user_init(void);
+
 // string.c
 void* memset(void*, int, uint);
