@@ -70,9 +70,14 @@ void main()
     test_printf_edge_cases();
     printf("\n--- Lab 2 tests passed ---\n");
 
-    printf("\n--- Running Lab 3 tests ---\n");
-    pmm_init(); // 初始化物理内存管理器
-    test_physical_memory(); // 测试物理内存管理器
+    printf("\n--- Running Lab 3 setup ---\n");
+    pmm_init();         // 初始化物理内存管理器
+    kvm_init();         // 创建内核页表
+    kvm_init_hart();    // 启用分页
+    printf("--- Lab 3 setup finished, paging enabled ---\n");
+
+    printf("\n--- Running Lab 3 tests (post-paging) ---\n");
+    test_physical_memory(); // 在分页启用后再次测试物理内存分配
     printf("--- Lab 3 tests passed ---\n");
 
     printf("\nAll tests passed. Halting.\n");

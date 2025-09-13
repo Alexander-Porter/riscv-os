@@ -16,7 +16,10 @@ SRC = \
 	kernel/console.c \
 	kernel/main.c \
 	kernel/printf.c \
-	kernel/kalloc.c
+	kernel/kalloc.c \
+	kernel/vm.c \
+	kernel/string.c
+
 
 
 # Object files

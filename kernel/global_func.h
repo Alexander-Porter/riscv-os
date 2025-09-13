@@ -1,3 +1,5 @@
+#include "types.h"
+
 void uart_puts(const char *s);
 void uart_putc(int c);
 void panic(const char *s);
@@ -10,3 +12,10 @@ void clear_screen(void);
 void pmm_init();
 void* alloc_page(void);
 void free_page(void*);
+
+// vm.c
+void kvm_init();
+void kvm_init_hart();
+
+// string.c
+void* memset(void*, int, uint);
