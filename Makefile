@@ -20,6 +20,10 @@ SRC = \
 	kernel/vm.c \
 	kernel/string.c \
 	kernel/list.c
+	kernel/trap.c \
+	kernel/kernelvec.S
+
+
 
 
 # Object files

@@ -47,24 +47,60 @@ extern pagetable_t kernel_pagetable;
 // -------------------- SATP 寄存器 -------------------- 
 
 // Supervisor Address Translation and Protection (SATP) 寄存器
-// +----16----+----4----+-----------------44-----------------+
-// | 63..60   | 59..44 |              43..0                 |
-// |   MODE   |  ASID  |                PPN                 |
-// +----------+--------+------------------------------------+
 #define SATP_SV39 (8L << 60) // MODE=8 表示Sv39分页模式
 #define MAKE_SATP(pagetable) (SATP_SV39 | (((uint64)pagetable) >> 12))
 
-// -------------------- CSR 读写宏 -------------------- 
+// -------------------- SSTATUS/SIE/SIP 等寄存器 -------------------- 
+#define SSTATUS_SIE (1L << 1) // Supervisor Interrupt Enable
+#define SIE_SEIE (1L << 9)    // Supervisor External Interrupt Enable
+#define SIE_STIE (1L << 5)    // Supervisor Timer Interrupt Enable
+#define SIE_SSIE (1L << 1)    // Supervisor Software Interrupt Enable
 
-// 读写SATP寄存器的内联汇编宏
-static inline void w_satp(uint64 x) {
-  asm volatile("csrw satp, %0" : : "r" (x));
+
+// -------------------- CSR 读写函数 -------------------- 
+
+static inline uint64 r_sstatus() {
+  uint64 x;
+  asm volatile("csrr %0, sstatus" : "=r" (x));
+  return x;
 }
 
-static inline uint64 r_satp() {
+static inline void w_sstatus(uint64 x) {
+  asm volatile("csrw sstatus, %0" : : "r" (x));
+}
+
+static inline void w_stvec(uint64 x) {
+  asm volatile("csrw stvec, %0" : : "r" (x));
+}
+
+static inline uint64 r_sie() {
   uint64 x;
-  asm volatile("csrr %0, satp" : "=r" (x));
+  asm volatile("csrr %0, sie" : "=r" (x));
   return x;
+}
+
+static inline void w_sie(uint64 x) {
+  asm volatile("csrw sie, %0" : : "r" (x));
+}
+
+static inline uint64 r_scause() {
+  uint64 x;
+  asm volatile("csrr %0, scause" : "=r" (x));
+  return x;
+}
+
+static inline uint64 r_sepc() {
+  uint64 x;
+  asm volatile("csrr %0, sepc" : "=r" (x));
+  return x;
+}
+
+static inline void w_mideleg(uint64 x) {
+  asm volatile("csrw mideleg, %0" : : "r" (x));
+}
+
+static inline void w_satp(uint64 x) {
+  asm volatile("csrw satp, %0" : : "r" (x));
 }
 
 // 刷新TLB的宏

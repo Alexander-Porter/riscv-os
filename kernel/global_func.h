@@ -1,5 +1,8 @@
 #include "types.h"
 
+// main.c
+void main();
+
 void uart_puts(const char *s);
 void uart_putc(int c);
 void panic(const char *s);
@@ -21,6 +24,10 @@ void bd_print(); // 打印伙伴系统状态, 仅调试用
 // vm.c
 void kvm_init();
 void kvm_init_hart();
+
+// trap.c
+void trapinithart(void);
+void kerneltrap();
 
 // string.c
 void* memset(void*, int, uint);
