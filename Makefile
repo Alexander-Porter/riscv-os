@@ -14,9 +14,10 @@ SRC = \
 	kernel/start.c \
 	kernel/uart.c \
 	kernel/console.c \
-	kernel/console.c \
 	kernel/main.c \
-	kernel/printf.c
+	kernel/printf.c \
+	kernel/kalloc.c
+
 
 # Object files
 OBJ = $(SRC:.c=.o)
