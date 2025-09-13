@@ -45,12 +45,12 @@ int
 printf(char *fmt, ...)
 {
   va_list ap;
-  int i, cx, c0, c1, c2;
+  int i, char_now, c0, c1, c2;
   char *s;
-
-  for(i = 0; (cx = fmt[i] & 0xff) != 0; i++){
-    if(cx != '%'){
-      console_putc(cx);
+  va_start(ap, fmt);
+  for(i = 0; (char_now = fmt[i] & 0xff) != 0; i++){
+    if(char_now != '%'){
+      console_putc(char_now);
       continue;
     }
     i++;
@@ -102,11 +102,17 @@ printf(char *fmt, ...)
     }
 
   }
-
+  va_end(ap);
   return 0;
 }
 
 
+
+void
+clear_screen(void)
+{
+  printf("\033[2J\033[H");
+}
 
 void
 printfinit(void)

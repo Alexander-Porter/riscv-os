@@ -4,3 +4,4 @@ void panic(const char *s);
 int uart_getc(void);
 void uart_init(void);
 int printf(char *fmt, ...);
+void clear_screen(void);
