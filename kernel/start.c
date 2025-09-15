@@ -19,7 +19,5 @@ if (bss_test != 0 || bss_test_float != 0.0f) {
     uart_puts(".bss segment cleared, at least we have zero for bss_test and bss_test_float.\n");
 }
 
-while(1) {
-    // 死循环，防止程序结束
-}
+
 }

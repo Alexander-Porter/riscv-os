@@ -39,3 +39,7 @@ qemu: $(KERNEL_BIN)
 	$(QEMU) -machine virt -nographic -kernel $(KERNEL_BIN)
 qemu_wrong: $(KERNEL_BIN)_wrong
 	$(QEMU) -machine virt -nographic -kernel $(KERNEL_BIN)_wrong
+
+# Boot via ELF directly (like xv6): QEMU parses ELF PT_LOAD and zeroes .bss
+qemu_elf: $(KERNEL_ELF)
+	$(QEMU) -machine virt -nographic -bios none -kernel $(KERNEL_ELF)
