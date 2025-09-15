@@ -13,7 +13,6 @@ SECTIONS
     kernel/entry.o(_entry)
     *(.text .text.*)
     . = ALIGN(0x1000);
-    . += 0x2000; /* 额外增加 8KB 的空间 */
      PROVIDE(etext = .);
   }
 
