@@ -22,8 +22,9 @@ SRC = \
 	kernel/list.c
 	kernel/trap.c \
 	kernel/proc.c \
-	kernel/kernelvec.S
-
+	kernel/kernelvec.S \
+	kernel/swtch.S \
+	user/initcode.S
 
 
 
@@ -47,10 +48,10 @@ $(KERNEL_ELF): $(OBJ)
 
 # Compile source files
 %.o: %.c
-	$(CC) $(CFLAGS) -c -o $@ $<
+	$(CC) $(CFLAGS) -c -o $@ $< 
 
 %.o: %.S
-	$(CC) $(CFLAGS) -c -o $@ $<
+	$(CC) $(CFLAGS) -c -o $@ $< 
 
 # Clean up
 clean:

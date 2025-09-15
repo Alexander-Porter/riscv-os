@@ -24,6 +24,16 @@ struct context {
   uint64 s11;
 };
 
+// 每个CPU核心的状态
+struct cpu {
+  struct proc *proc;          // 当前在CPU上运行的进程, 如果没有则为null
+  struct context context;     // 调度器的上下文, swtch切换到这里来进入调度器
+  int noff;                   // 关中断的嵌套深度
+  int intena;                 // 在关中断之前, 中断是否是开启的
+};
+
+extern struct cpu cpus[1]; // 目前只支持单核
+
 // 用户态陷入内核时，保存的用户寄存器和上下文信息
 // 这个结构体需要和kernelvec.S中的寄存器保存/恢复顺序严格对应
 struct trapframe {

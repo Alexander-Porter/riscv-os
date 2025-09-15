@@ -2,13 +2,15 @@
 
 #include "memlayout.h"
 #include "paging.h"
-#include "global_func.h"
 #include "types.h"
+#include "proc.h"
+#include "global_func.h"
 
 // 声明外部函数和变量
 void* alloc_page(void);
 void free_page(void*);
 void* memset(void*, int, uint);
+void* memmove(void*, const void*, uint);
 extern char etext[]; // 内核代码段结束地址
 extern char end[];   // 供范围检查时可选使用
 
@@ -146,4 +148,39 @@ void destroy_pagetable(pagetable_t pt) {
     }
   }
   free_page(pt); // 释放当前这一层的页框
+}
+
+// 为一个进程创建一个用户页表
+// (不包含任何映射)
+pagetable_t
+proc_pagetable(struct proc *p)
+{
+  pagetable_t pagetable;
+
+  // 分配一个物理页作为根页表
+  pagetable = (pagetable_t) alloc_page();
+  if(pagetable == 0)
+    return 0;
+  memset(pagetable, 0, PGSIZE);
+  return pagetable;
+}
+
+// 将初始用户程序(initcode)加载到用户页表的虚拟地址0
+void
+uvminit(pagetable_t pagetable, uchar *src, uint sz)
+{
+  char *mem;
+
+  if(sz >= PGSIZE)
+    panic("uvminit: initcode larger than a page");
+  // 分配一页物理内存
+  mem = alloc_page();
+  // 将该页清零
+  memset(mem, 0, PGSIZE);
+  // 将虚拟地址0映射到刚分配的物理页
+  // PTE_U: 用户态可以访问
+  // PTE_R|W|X: 可读、可写、可执行
+  mappages(pagetable, 0, PGSIZE, (uint64)mem, PTE_W|PTE_R|PTE_X|PTE_U);
+  // 将initcode的内容拷贝到该物理页
+  memmove(mem, src, sz);
 }

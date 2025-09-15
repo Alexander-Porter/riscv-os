@@ -1,4 +1,5 @@
 #include "types.h"
+#include "proc.h"
 
 // main.c
 void main();
@@ -24,6 +25,8 @@ void bd_print(); // 打印伙伴系统状态, 仅调试用
 // vm.c
 void kvm_init();
 void kvm_init_hart();
+pagetable_t proc_pagetable(struct proc *p);
+void uvminit(pagetable_t, uchar *, uint);
 
 // trap.c
 void trapinithart(void);
@@ -32,6 +35,10 @@ void kerneltrap();
 // proc.c
 void proc_init(void);
 void user_init(void);
+struct proc* alloc_proc(void);
+void scheduler(void);
+void swtch(struct context*, struct context*);
 
 // string.c
 void* memset(void*, int, uint);
+void* memmove(void*, const void*, uint);

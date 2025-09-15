@@ -31,9 +31,6 @@ void main()
     trapinithart();     // 初始化中断向量和使能
     printf("Trap handling initialized.\n");
 
-    printf("Setting first timer interrupt...\n");
-    sbi_set_timer(r_time() + 10000000); // 设置第一次时钟中断
-
-    printf("Initialization complete. Idling...\n");
-    while(1);
+    printf("Starting scheduler...\n");
+    scheduler();
 }

@@ -9,9 +9,14 @@
 struct proc proc[NPROC];
 struct proc *initproc;
 
+struct cpu cpus[1];
+
 int nextpid = 1;
 
 void forkret(void);
+extern void swtch(struct context*, struct context*);
+
+extern char _initcode_start[], _initcode_end[];
 
 // 初始化进程表
 void
@@ -26,8 +31,7 @@ proc_init(void)
 // 分配一个新进程
 // 找到一个UNUSED的proc, 初始化它的状态为USED, 分配PID
 // 并为其分配一个内核栈和trapframe
-struct proc*
-alloc_proc(void)
+struct proc* alloc_proc(void)
 {
   struct proc *p;
 
@@ -71,6 +75,40 @@ void forkret()
   // 后续这里将调用usertrapret
 }
 
+// 一个非常简单的调度器。循环遍历进程表，
+// 寻找一个可运行的(RUNNABLE)进程，然后切换到它。
+void
+scheduler(void)
+{
+  struct proc *p;
+  struct cpu *c = &cpus[0];
+  
+  c->proc = 0; // 当前没有进程在运行
+  for(;;){
+    // 在RISC-V中, M模式下的中断是默认开启的。
+    // S模式下的中断需要手动开启。
+    // 我们将在trap.c中处理中断使能。
+
+    // 遍历进程表
+    for(p = proc; p < &proc[NPROC]; p++) {
+      if(p->state == RUNNABLE) {
+        // 找到了一个可运行的进程，准备切换
+        p->state = RUNNING;
+        c->proc = p;
+
+        // swtch是一个汇编函数, 它会保存当前上下文(调度器的上下文)
+        // 到c->context, 然后恢复p->context指定的下一个进程的上下文
+        // 从而实现进程切换。
+        swtch(&c->context, &p->context);
+
+        // 当进程切换回来时, 说明它已经执行了一段时间。
+        // 进程应该在返回前改变自己的状态(例如, 变为RUNNABLE或SLEEPING)
+        c->proc = 0;
+      }
+    }
+  }
+}
+
 // 创建第一个用户进程
 void
 user_init(void)
@@ -82,11 +120,26 @@ user_init(void)
     panic("user_init: alloc_proc failed");
   
   initproc = p;
-  printf("user_init: first process allocated, pid=%d\n", p->pid);
+  
+  // 为第一个进程创建页表
+  p->pagetable = proc_pagetable(p);
+  if(p->pagetable == 0)
+    panic("user_init: proc_pagetable failed");
 
-  // 接下来的步骤: 
-  // 1. 创建用户页表
-  // 2. 加载initcode.S到内存
-  // 3. 设置trapframe
-  // 4. 将进程状态设置为RUNNABLE
+  // 将initcode.S的代码加载到内存地址0。
+  // initcode.S是第一个用户程序, 它非常简单, 只是执行一个ecall。
+  // _initcode_start和_initcode_end是在kernel.ld中定义的符号,
+  // 它们分别指向initcode.S的开始和结束地址。
+  uvminit(p->pagetable, (uchar*)_initcode_start, _initcode_end - _initcode_start);
+  p->sz = PGSIZE; // 进程大小为一页
+
+  // 准备进入用户空间
+  // 设置trapframe的epc为0, 这是用户程序的入口点
+  p->trapframe->epc = 0;
+  // 设置用户栈顶, 用户栈位于虚拟地址空间的顶部
+  p->trapframe->sp = PGSIZE;
+
+  p->state = RUNNABLE;
+
+  printf("user_init: 第一个进程已创建, 等待调度!\n");
 }
