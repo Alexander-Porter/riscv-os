@@ -27,7 +27,7 @@ OBJ = $(SRC:.c=.o)
 OBJ := $(OBJ:.S=.o)
 
 # Compilation flags
-CFLAGS = -Wall -O2 -ffreestanding -nostdlib -mcmodel=medany
+CFLAGS = -Wall -Og -g -ffreestanding -nostdlib -mcmodel=medany
 LDFLAGS = -T $(LINKER_SCRIPT) -nostdlib -nostartfiles
 
 # Default target
@@ -54,3 +54,8 @@ clean:
 # Run QEMU
 qemu: $(KERNEL_BIN)
 	$(QEMU) -machine virt -nographic -kernel $(KERNEL_BIN)
+
+# Run QEMU for GDB debugging
+qemu-gdb: $(KERNEL_ELF)
+	@echo "Starting QEMU for GDB debugging. Connect GDB to localhost:1234"
+	$(QEMU) -machine virt -nographic -kernel $(KERNEL_ELF) -s -S -bios none

@@ -25,11 +25,21 @@ void test_printf_edge_cases()
     printf("NULL string: %s\n", (char *)0);
     printf("Empty string: %s\n", "");
 }
+int test_max_alloc() {
+    int count = 0;
+    while (kmalloc(sizeof(char)) != 0)
+    {
+        /* code */
+        count++;
+    }
+    printf("Max allocable blocks: %d\n", count);
+    return 0;
+}
 
 // Lab3: 物理内存分配器功能测试
 void test_physical_memory() {
 printf("\nTesting physical memory allocator...\n");
-
+bd_print(); // 打印初始状态
 // 测试基本分配和释放
 void *page1 = alloc_page();
 void *page2 = alloc_page();
@@ -38,7 +48,7 @@ assert(page1 != page2);
 assert(((uint64)page1 & 0xFFF) == 0);  // 页对齐检查
 assert(((uint64)page2 & 0xFFF) == 0);  // 页对齐检查
 printf("  - allocation and alignment test passed\n");
-
+bd_print(); // 打印分配后状态
 // 测试数据写入
 *(int*)page1 = 0x12345678;
 assert(*(int*)page1 == 0x12345678);
@@ -68,6 +78,7 @@ void main()
 
     printf("\n--- Running Lab 3 setup ---\n");
     pmm_init();         // 初始化物理内存管理器
+    test_physical_memory(); // 测试物理内存分配
     kvm_init();         // 创建内核页表
     kvm_init_hart();    // 启用分页
     printf("--- Lab 3 setup finished, paging enabled ---\n");
@@ -77,5 +88,6 @@ void main()
     printf("--- Lab 3 tests passed ---\n");
 
     printf("\nAll tests passed. Halting.\n");
+    test_max_alloc();
     while(1);
 }

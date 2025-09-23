@@ -14,7 +14,7 @@ extern char etext[]; // 内核代码段结束地址
 // 全局唯一的内核页表
 pagetable_t kernel_pagetable;
 
-// 在页表中查找虚拟地址va对应的PTE地址
+// 从最顶级页表开始，在页表中查找虚拟地址va对应的PTE地址
 // 若alloc为1, 则在PTE无效时分配新页
 static pte_t*
 walk(pagetable_t pagetable, uint64 va, int alloc)
@@ -26,11 +26,11 @@ walk(pagetable_t pagetable, uint64 va, int alloc)
     pte_t *pte = &pagetable[VPN(va, level)];
     if(*pte & PTE_V) {
       pagetable = (pagetable_t)PTE2PA(*pte);
-    } else {
-      if(!alloc || (pagetable = (pagetable_t)alloc_page()) == 0)
+    } else {//无效
+      if(!alloc || (pagetable = (pagetable_t)alloc_page()) == 0) //不分配或者分配失败的情形
         return 0;
-      memset(pagetable, 0, PGSIZE);
-      *pte = PA2PTE(pagetable) | PTE_V;
+      memset(pagetable, 0, PGSIZE);//否则分配成功，清零
+      *pte = PA2PTE(pagetable) | PTE_V;//写入pte，但是不会写入最后一级的pte
     }
   }
   return &pagetable[VPN(va, 0)];
@@ -48,12 +48,12 @@ mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm)
 
   a = PGROUNDDOWN(va);
   last = PGROUNDDOWN(va + size - 1);
-  for(;;){
+  for(;;){//为[a, last]区间内的每一页建立映射
     if((pte = walk(pagetable, a, 1)) == 0)
       return -1;
-    if(*pte & PTE_V)
+    if(*pte & PTE_V)//已经存在映射，这是不应该的
       panic("mappages: remap");
-    *pte = PA2PTE(pa) | perm | PTE_V;
+    *pte = PA2PTE(pa) | perm | PTE_V;//写入最后一级的pte
     if(a == last)
       break;
     a += PGSIZE;
