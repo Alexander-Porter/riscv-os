@@ -2,6 +2,14 @@
 #include "memlayout.h"
 #include "types.h"
 
+// 读取time寄存器的内联函数
+static inline uint64 r_time()
+{
+    uint64 x;
+    asm volatile("csrr %0, time" : "=r" (x) );
+    return x;
+}
+
 // 简易断言宏, 条件为假时触发panic
 #define assert(x) do { if (!(x)) panic("assertion failed"); } while (0)
 
@@ -36,10 +44,38 @@ int test_max_alloc() {
     return 0;
 }
 
+void test_many_alloc_free_timings() {
+    const int N = 100;
+    void* pages[N];
+    uint64 start_time, end_time;
+
+    // 分配N页
+    start_time = r_time();
+    for (int i = 0; i < N; i++) {
+        pages[i] = alloc_page();
+        if (pages[i] == 0) {
+            printf("Allocation failed at %d\n", i);
+            break;
+        }
+    }
+    end_time = r_time();
+    printf("Allocated %d pages in %d ticks\n", N, end_time - start_time);
+
+    // 释放N页
+    start_time = r_time();
+    for (int i = 0; i < N; i++) {
+        if (pages[i]) {
+            free_page(pages[i]);
+        }
+    }
+    end_time = r_time();
+    printf("Freed %d pages in %d ticks\n", N, end_time - start_time);
+}
+
 // Lab3: 物理内存分配器功能测试
 void test_physical_memory() {
 printf("\nTesting physical memory allocator...\n");
-bd_print(); // 打印初始状态
+
 // 测试基本分配和释放
 void *page1 = alloc_page();
 void *page2 = alloc_page();
@@ -48,7 +84,7 @@ assert(page1 != page2);
 assert(((uint64)page1 & 0xFFF) == 0);  // 页对齐检查
 assert(((uint64)page2 & 0xFFF) == 0);  // 页对齐检查
 printf("  - allocation and alignment test passed\n");
-bd_print(); // 打印分配后状态
+
 // 测试数据写入
 *(int*)page1 = 0x12345678;
 assert(*(int*)page1 == 0x12345678);
@@ -88,6 +124,8 @@ void main()
     printf("--- Lab 3 tests passed ---\n");
 
     printf("\nAll tests passed. Halting.\n");
+    test_many_alloc_free_timings();
     test_max_alloc();
+    
     while(1);
 }
