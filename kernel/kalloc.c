@@ -43,46 +43,24 @@ typedef struct sz_info Sz_info;
 static Sz_info *bd_sizes;       // 指向所有阶信息的数组
 static void *bd_base;           // 伙伴系统管理的内存区域的基地址
 static struct spinlock bd_lock; // 保护伙伴系统的锁
+static uint64 freelist_bitmap;  // 新增: 用于快速查找非空闲链表的位图
 
 // ===== 位操作辅助函数 =====
 
-// 检查位图中指定索引的位是否被设置 (用于split位图)
-static int bit_isset(char *array, int index)
-{
-  char b = array[index / 8];
-  char m = (1 << (index % 8));
-  return (b & m) == m;
-}
-// 检查XOR压缩位图中指定索引的位是否被设置 (用于alloc位图)
-// 索引需要除以2, 因为每对伙伴共享一个bit
-static int new_bit_isset(char *array, int index)
-{
-  index /= 2;
-  char b = array[index / 8];
-  char m = (1 << (index % 8));
-  return (b & m) == m;
-}
-// 在位图中设置指定索引的位
-static void bit_set(char *array, int index)
-{
-  char b = array[index / 8];
-  char m = (1 << (index % 8));
-  array[index / 8] = (b | m);
-}
-// 翻转XOR压缩位图中指定索引的位
-static void new_bit_set(char *array, int index)
-{
-  index /= 2;
-  char m = (1 << (index % 8));
-  array[index / 8] ^= m; // 使用异或操作进行翻转
-}
-// 在位图中清除指定索引的位
-static void bit_clear(char *array, int index)
-{
-  char b = array[index / 8];
-  char m = (1 << (index % 8));
-  array[index / 8] = (b & ~m);
-}
+#define bit_isset(array, index) ((((char *)(array))[(index) / 8] & (1 << ((index) % 8))) != 0)
+#define new_bit_isset(array, index) (bit_isset((array), (index) / 2))
+
+#define bit_set(array, index) do { \
+    ((char *)(array))[(index) / 8] |= (1 << ((index) % 8)); \
+} while(0)
+
+#define new_bit_set(array, index) do { \
+    ((char *)(array))[((index) / 2) / 8] ^= (1 << (((index) / 2) % 8)); \
+} while(0)
+
+#define bit_clear(array, index) do { \
+    ((char *)(array))[(index) / 8] &= ~(1 << ((index) % 8)); \
+} while(0)
 
 // ===== 地址与索引计算辅助函数 =====
 
@@ -98,6 +76,27 @@ static int firstk(uint64 n)
   }
   return k;
 }
+
+// 设置freelist_bitmap中对应阶的位
+static inline void set_freelist_bit(int k) {
+  freelist_bitmap |= (1L << k);
+}
+
+// 清除freelist_bitmap中对应阶的位
+static inline void clear_freelist_bit(int k) {
+  freelist_bitmap &= ~(1L << k);
+}
+
+// 查找大于等于k的第一个置位。返回bit的位置(从1开始), 未找到则返回0。
+static inline int find_first_set_ge(uint64 mask, int k) {
+    for (int i = k; i < 64; i++) {
+        if ((mask >> i) & 1) {
+            return i + 1;
+        }
+    }
+    return 0;
+}
+
 // 根据指针p计算其在k阶块中的索引
 static int blk_index(int k, char *p)
 {
@@ -198,10 +197,13 @@ static int bd_initfree_pair(int k, int bi, void *min_left, void *max_right)
   {
     free = BLK_SIZE(k);
     // 检查伙伴块是否在有效内存范围内
-    if (addr(k, buddy) >= min_left && addr(k, buddy) < max_right)
+    if (addr(k, buddy) >= min_left && addr(k, buddy) < max_right) {
+      if(lst_empty(&bd_sizes[k].free)) set_freelist_bit(k);
       lst_push(&bd_sizes[k].free, addr(k, buddy)); // 将伙伴块加入空闲链表
-    else
+    } else {
+      if(lst_empty(&bd_sizes[k].free)) set_freelist_bit(k);
       lst_push(&bd_sizes[k].free, addr(k, bi)); // 否则将当前块加入
+    }
   }
   return free;
 }
@@ -250,6 +252,7 @@ static void bd_init(void *base, void *end)
   char *p = (char *)ROUNDUP((uint64)base, LEAF_SIZE); // 对齐我们的元数据起始地址
   int sz;
   initlock(&bd_lock, "buddy");
+  freelist_bitmap = 0; // 初始化位图为0
   bd_base = (void *)p; // 设置内存池基地址
 
   // 计算需要的阶数
@@ -316,12 +319,10 @@ void *kmalloc(uint64 nbytes)
   // 1. 找到能满足nbytes的最小的阶fk
   fk = firstk(nbytes);
 
-  // 2. 从fk阶开始, 向上寻找有空闲块的最小的阶k
-  for (k = fk; k < nsizes; k++)
-  {
-    if (!lst_empty(&bd_sizes[k].free))
-      break;
-  }
+  // 2. 使用位图快速查找有空闲块的最小的阶k (k >= fk)
+  int bit = find_first_set_ge(freelist_bitmap, fk);
+  k = (bit > 0) ? (bit - 1) : nsizes;
+
   if (k >= nsizes)
   { // 没有找到足够大的空闲块
     release(&bd_lock);
@@ -329,12 +330,8 @@ void *kmalloc(uint64 nbytes)
   }
 
   // 3. 从k阶的空闲链表中取出一个块
-  if (lst_empty(&bd_sizes[k].free))
-  {
-    release(&bd_lock);
-    return 0;
-  }
   char *p = (char *)lst_pop(&bd_sizes[k].free);
+  if(lst_empty(&bd_sizes[k].free)) clear_freelist_bit(k); // 更新位图
   new_bit_set(bd_sizes[k].alloc, blk_index(k, p)); // 标记为已分配
 
   // 4. 如果k > fk, 需要将大块分裂
@@ -344,6 +341,7 @@ void *kmalloc(uint64 nbytes)
     char *q = p + BLK_SIZE(k - 1);
     bit_set(bd_sizes[k].split, blk_index(k, p));             // 标记父块已分裂
     new_bit_set(bd_sizes[k - 1].alloc, blk_index(k - 1, p)); // 标记p为已分配
+    if(lst_empty(&bd_sizes[k-1].free)) set_freelist_bit(k-1); // 更新位图
     lst_push(&bd_sizes[k - 1].free, q);                      // 将后半部分q加入低一阶的空闲链表
   }
 
@@ -389,16 +387,17 @@ void free_page(void *vp)
     // 3. 伙伴块空闲, 进行合并
     q = addr(k, buddy);           // 获取伙伴块的地址
     lst_remove((struct list *)q); // 从空闲链表中移除伙伴块
+    if(lst_empty(&bd_sizes[k].free)) clear_freelist_bit(k); // 更新位图
 
     // 选择地址较小的块作为合并后大块的基地址
     if (buddy % 2 == 0)
       p = q;
-
     // 清除父块的分裂标记
     bit_clear(bd_sizes[k + 1].split, blk_index(k + 1, p));
   }
 
   // 4. 将最终合并的块或未合并的块加入对应阶的空闲链表
+  if(lst_empty(&bd_sizes[k].free)) set_freelist_bit(k); // 更新位图
   lst_push(&bd_sizes[k].free, p);
   release(&bd_lock);
 }
@@ -424,7 +423,7 @@ void *alloc_page()
 }
 
 // 分配2^order个连续的物理页
-void *alloc_pages(int order)
+void *alloc_pages(int count)
 {
-  return kmalloc(((uint64)1 << order) * PGSIZE);
+  return kmalloc(count * PGSIZE);
 }

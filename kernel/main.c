@@ -45,14 +45,14 @@ int test_max_alloc() {
 }
 
 void test_many_alloc_free_timings() {
-    const int N = 100;
+    const int N = 50;
     void* pages[N];
     uint64 start_time, end_time;
 
     // 分配N页
     start_time = r_time();
     for (int i = 0; i < N; i++) {
-        pages[i] = alloc_page();
+        pages[i] = alloc_pages(10);
         if (pages[i] == 0) {
             printf("Allocation failed at %d\n", i);
             break;
