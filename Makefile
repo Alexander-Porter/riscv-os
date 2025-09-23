@@ -18,8 +18,8 @@ SRC = \
 	kernel/printf.c \
 	kernel/kalloc.c \
 	kernel/vm.c \
-	kernel/string.c
-
+	kernel/string.c \
+	kernel/list.c
 
 
 # Object files
