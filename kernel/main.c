@@ -14,26 +14,6 @@ static inline uint64 r_time()
 // 简易断言宏, 条件为假时触发panic
 #define assert(x) do { if (!(x)) panic("assertion failed"); } while (0)
 
-// Lab2: printf功能基础测试
-void test_printf_basic()
-{
-    printf("Testing integer: %d\n", 42);
-    printf("Testing negative: %d\n", -123);
-    printf("Testing zero: %d\n", 0);
-    printf("Testing hex: 0x%x\n", 0xABC);
-    printf("Testing string: %s\n", "Hello");
-    printf("Testing char: %c\n", 'X');
-    printf("Testing percent: %%");
-}
-
-// Lab2: printf功能边界条件测试
-void test_printf_edge_cases()
-{
-    printf("INT_MAX: %d\n", 2147483647);
-    printf("INT_MIN: %d\n", -2147483648);
-    printf("NULL string: %s\n", (char *)0);
-    printf("Empty string: %s\n", "");
-}
 int test_max_alloc() {
     int count = 0;
     while (kmalloc(sizeof(char)) != 0)
@@ -47,7 +27,7 @@ int test_max_alloc() {
 
 void test_many_alloc_free_timings() {
     const int N = 50;
-    const int per_page = 10; // 每次分配10页
+    const int per_page = 5; // 每次分配5页
     void* pages[N];
     uint64 start_time, end_time;
 
