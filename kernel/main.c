@@ -1,5 +1,6 @@
 #include "global_func.h"
 #include "memlayout.h"
+#include "paging.h"      // 引入 pagetable_t 与 dump_pagetable 原型
 #include "types.h"
 
 // 读取time寄存器的内联函数
@@ -46,20 +47,21 @@ int test_max_alloc() {
 
 void test_many_alloc_free_timings() {
     const int N = 50;
+    const int per_page = 10; // 每次分配10页
     void* pages[N];
     uint64 start_time, end_time;
 
     // 分配N页
     start_time = r_time();
     for (int i = 0; i < N; i++) {
-        pages[i] = alloc_pages(10);
+        pages[i] = alloc_pages(per_page);
         if (pages[i] == 0) {
             printf("Allocation failed at %d\n", i);
             break;
         }
     }
     end_time = r_time();
-    printf("Allocated %d pages in %d ticks\n", N, end_time - start_time);
+    printf("Allocated %d*%d pages in %d ticks\n", N, per_page, end_time - start_time);
 
     // 释放N页
     start_time = r_time();
@@ -69,8 +71,9 @@ void test_many_alloc_free_timings() {
         }
     }
     end_time = r_time();
-    printf("Freed %d pages in %d ticks\n", N, end_time - start_time);
+    printf("Freed %d*%d pages in %d ticks\n", N, per_page,   end_time - start_time);
 }
+
 
 // Lab3: 物理内存分配器功能测试
 void test_physical_memory() {
@@ -106,26 +109,32 @@ printf("Physical memory allocator tests passed!\n");
 void main()
 {
     clear_screen();
-    
-    printf("--- Running Lab 2 tests ---\n");
-    test_printf_basic();
-    test_printf_edge_cases();
-    printf("\n--- Lab 2 tests passed ---\n");
 
     printf("\n--- Running Lab 3 setup ---\n");
     pmm_init();         // 初始化物理内存管理器
     test_physical_memory(); // 测试物理内存分配
     kvm_init();         // 创建内核页表
     kvm_init_hart();    // 启用分页
+    // 调试: 打印当前内核页表结构 (Sv39 三层)
+    printf("\n--- Kernel pagetable dump ---\n");
+    dump_pagetable(kernel_pagetable, 2);
+    printf("--- End pagetable dump ---\n\n");
     printf("--- Lab 3 setup finished, paging enabled ---\n");
 
     printf("\n--- Running Lab 3 tests (post-paging) ---\n");
     test_physical_memory(); // 在分页启用后再次测试物理内存分配
-    printf("--- Lab 3 tests passed ---\n");
 
-    printf("\nAll tests passed. Halting.\n");
+
+
     test_many_alloc_free_timings();
-    test_max_alloc();
+    //test_max_alloc();
+    void *page4 = alloc_page();
+    //写入数据
+    *(int*)page4 = 0x87654321;
     
+    destroy_pagetable(kernel_pagetable);
+    //asm volatile("sfence.vma zero, zero");
+    assert(*(int*)page4 == 0x87654321); // 检查数据是否仍然完整
+    printf("Kernel main completed. Halting.\n");
     while(1);
 }

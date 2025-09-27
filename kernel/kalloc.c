@@ -21,7 +21,7 @@ static inline void initlock(struct spinlock *lk, const char *name)
 static inline void acquire(struct spinlock *lk) { (void)lk; }
 static inline void release(struct spinlock *lk) { (void)lk; }
 
-// ===== 伙伴系统核心 (参考实现改编) =====
+
 static int nsizes; // 块大小的种类数量 (k=0..nsizes-1)
 
 #define LEAF_SIZE 128                                    // 最小块大小, 16字节
@@ -48,13 +48,13 @@ static uint64 freelist_bitmap;  // 新增: 用于快速查找非空闲链表的�
 // ===== 位操作辅助函数 =====
 
 #define bit_isset(array, index) ((((char *)(array))[(index) / 8] & (1 << ((index) % 8))) != 0)
-#define new_bit_isset(array, index) (bit_isset((array), (index) / 2))
+#define bit_isset_pair(array, index) (bit_isset((array), (index) / 2))
 
 #define bit_set(array, index) do { \
     ((char *)(array))[(index) / 8] |= (1 << ((index) % 8)); \
 } while(0)
 
-#define new_bit_set(array, index) do { \
+#define bit_xor_pair(array, index) do { \
     ((char *)(array))[((index) / 2) / 8] ^= (1 << (((index) / 2) % 8)); \
 } while(0)
 
@@ -183,7 +183,7 @@ static void bd_mark(void *start, void *stop)
     {
       if (k > 0)
         bit_set(bd_sizes[k].split, bi);   // 标记为已分裂, 防止被上层合并
-      new_bit_set(bd_sizes[k].alloc, bi); // 翻转XOR位, 标记为已分配
+      bit_xor_pair(bd_sizes[k].alloc, bi); // 翻转XOR位, 标记为已分配
     }
   }
 }
@@ -193,7 +193,7 @@ static int bd_initfree_pair(int k, int bi, void *min_left, void *max_right)
 {
   int buddy = (bi % 2) == 0 ? bi + 1 : bi - 1;
   int free = 0;
-  if (new_bit_isset(bd_sizes[k].alloc, bi)) // 如果XOR位为1, 说明这对伙伴中有一个是空闲的
+  if (bit_isset_pair(bd_sizes[k].alloc, bi)) // 如果XOR位为1, 说明这对伙伴中有一个是空闲的
   {
     free = BLK_SIZE(k);
     // 检查伙伴块是否在有效内存范围内
@@ -332,7 +332,7 @@ void *kmalloc(uint64 nbytes)
   // 3. 从k阶的空闲链表中取出一个块
   char *p = (char *)lst_pop(&bd_sizes[k].free);
   if(lst_empty(&bd_sizes[k].free)) clear_freelist_bit(k); // 更新位图
-  new_bit_set(bd_sizes[k].alloc, blk_index(k, p)); // 标记为已分配
+  bit_xor_pair(bd_sizes[k].alloc, blk_index(k, p)); // 标记为已分配
 
   // 4. 如果k > fk, 需要将大块分裂
   for (; k > fk; k--)
@@ -340,7 +340,7 @@ void *kmalloc(uint64 nbytes)
     // 将块p分裂成两半, 前半部分仍是p, 后半部分是q
     char *q = p + BLK_SIZE(k - 1);
     bit_set(bd_sizes[k].split, blk_index(k, p));             // 标记父块已分裂
-    new_bit_set(bd_sizes[k - 1].alloc, blk_index(k - 1, p)); // 标记p为已分配
+    bit_xor_pair(bd_sizes[k - 1].alloc, blk_index(k - 1, p)); // 标记p为已分配
     if(lst_empty(&bd_sizes[k-1].free)) set_freelist_bit(k-1); // 更新位图
     lst_push(&bd_sizes[k - 1].free, q);                      // 将后半部分q加入低一阶的空闲链表
   }
@@ -378,10 +378,10 @@ void free_page(void *vp)
     int bi = blk_index(k, p);
     int buddy = (bi % 2) == 0 ? bi + 1 : bi - 1; // 计算伙伴块的索引
 
-    new_bit_set(bd_sizes[k].alloc, bi); // 翻转XOR位, 标记p为"空闲"
+    bit_xor_pair(bd_sizes[k].alloc, bi); // 翻转XOR位, 标记p为"空闲"
 
     // 检查伙伴块是否也空闲 (如果XOR位为1, 说明伙伴块是已分配的)
-    if (new_bit_isset(bd_sizes[k].alloc, buddy))
+    if (bit_isset_pair(bd_sizes[k].alloc, buddy))
       break; // 伙伴块已分配, 停止合并
 
     // 3. 伙伴块空闲, 进行合并

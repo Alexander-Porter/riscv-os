@@ -10,6 +10,7 @@ void* alloc_page(void);
 void free_page(void*);
 void* memset(void*, int, uint);
 extern char etext[]; // 内核代码段结束地址
+extern char end[];   // 供范围检查时可选使用
 
 // 全局唯一的内核页表
 pagetable_t kernel_pagetable;
@@ -22,7 +23,7 @@ walk(pagetable_t pagetable, uint64 va, int alloc)
   if(va >= PHYSTOP)
     panic("walk");
 
-  for(int level = 2; level > 0; level--) {
+  for(int level = PT_LEVELS-1; level > 0; level--) {
     pte_t *pte = &pagetable[VPN(va, level)];
     if(*pte & PTE_V) {
       pagetable = (pagetable_t)PTE2PA(*pte);
@@ -85,4 +86,64 @@ kvm_init_hart()
 {
   w_satp(MAKE_SATP(kernel_pagetable));
   sfence_vma();
+}
+
+// ---------------- 调试与销毁辅助函数 ----------------
+
+// 打印缩进
+static void indent(int level) {
+  for(int i=0;i<level;i++) printf("  ");
+}
+
+static const char *perm_str(pte_t pte) {
+  static char buf[8];
+  int i=0;
+  buf[i++] = (pte & PTE_R)?'R':'-';
+  buf[i++] = (pte & PTE_W)?'W':'-';
+  buf[i++] = (pte & PTE_X)?'X':'-';
+  buf[i++] = (pte & PTE_U)?'U':'-';
+  buf[i] = 0;
+  return buf;
+}
+
+// 递归遍历打印：level=2 顶层 -> 0 末级
+void dump_pagetable(pagetable_t pt, int level) {
+  if(pt == 0) {
+    indent(2-level); printf("<null pagetable>\n");
+    return;
+  }
+  const int SHOW_ENTRIES = 16; 
+  
+  if(level < 0 || level > 2) return;
+  for(int idx=0; idx<SHOW_ENTRIES; idx++) {
+    pte_t pte = pt[idx];
+    if(!(pte & PTE_V)) continue; // 跳过无效项
+    uint64 pa = PTE2PA(pte);
+    int is_leaf = (pte & (PTE_R|PTE_W|PTE_X)) != 0;
+    indent(2-level);
+    printf("L%d[%d]: PTE=0x%lx PA=0x%lx %s %s\n", level, idx, pte, pa, perm_str(pte), is_leaf?"(leaf)":"");
+    if(!is_leaf) {
+      dump_pagetable((pagetable_t)pa, level-1);
+    }
+  }
+}
+
+// 递归释放非叶子页表（类似 xv6 的 freewalk）。
+void destroy_pagetable(pagetable_t pt) {
+  if(pt == 0) return;
+  for(int i=0;i<PT_ENTRIES;i++) {
+    pte_t p = pt[i];
+    if(p & PTE_V) {
+      if((p & (PTE_R|PTE_W|PTE_X)) == 0) { // 非叶子
+        pagetable_t child = (pagetable_t)PTE2PA(p);
+        destroy_pagetable(child);
+        pt[i] = 0;
+      } else {
+        // 叶子映射，回收物理页
+        //free_page((void*)PTE2PA(p));
+        pt[i] = 0;
+      }
+    }
+  }
+  free_page(pt); // 释放当前这一层的页框
 }

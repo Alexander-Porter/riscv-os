@@ -1,4 +1,4 @@
-#define UART0 0x10000000L
+#include "memlayout.h"
 #define Reg(reg) ((volatile unsigned char *)(UART0 + (reg)))
 #define RHR 0                 // receive holding register (for input bytes)
 #define THR 0                 // transmit holding register (for output bytes)

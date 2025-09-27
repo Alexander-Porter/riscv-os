@@ -13,6 +13,13 @@
 typedef uint64 *pagetable_t; // 512个PTE组成的页表
 typedef uint64 pte_t; // 单个页表项
 
+// 每级页表的条目数：Sv39 每级 9 位索引 => 2^9 = 512
+#define PT_INDEX_BITS 9
+#define PT_ENTRIES    (1 << PT_INDEX_BITS)   // 512
+#define PT_LEVELS     3                      // Sv39 三级页表: level 2,1,0
+
+extern pagetable_t kernel_pagetable;
+
 // 虚拟地址的构成 (Sv39)
 // +--------10--------+--------9---------+--------9---------+--------9---------+--------12--------+
 // | 63..39 (ignored) | VPN[2] (9 bits) | VPN[1] (9 bits) | VPN[0] (9 bits) | offset (12 bits)|
@@ -65,6 +72,11 @@ static inline void sfence_vma() {
   // a zero rs1 means flush all entries.
   asm volatile("sfence.vma zero, zero");
 }
+
+// 调试功能：递归打印页表结构
+void dump_pagetable(pagetable_t pt, int level);
+// 递归释放页表层级（不释放叶子映射的物理页本身）
+void destroy_pagetable(pagetable_t pt);
 
 
 #endif // __PAGING_H

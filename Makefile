@@ -53,7 +53,7 @@ clean:
 
 # Run QEMU
 qemu: $(KERNEL_BIN)
-	$(QEMU) -machine virt -nographic -kernel $(KERNEL_BIN)
+	$(QEMU) -machine virt -nographic -kernel $(KERNEL_ELF) -bios none 
 
 # Run QEMU for GDB debugging
 qemu-gdb: $(KERNEL_ELF)
