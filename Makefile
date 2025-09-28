@@ -19,7 +19,7 @@ SRC = \
 	kernel/kalloc.c \
 	kernel/vm.c \
 	kernel/string.c \
-	kernel/list.c
+	kernel/list.c \
 	kernel/trap.c \
 	kernel/proc.c \
 	kernel/kernelvec.S \
