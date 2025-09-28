@@ -16,7 +16,7 @@ void main()
 
     printf("Initializing memory management...\n");
     pmm_init();         // 初始化物理内存管理器
-    test_physical_memory(); // 测试物理内存分配
+
     kvm_init();         // 创建内核页表
     kvm_init_hart();    // 启用分页
     printf("Paging enabled.\n");

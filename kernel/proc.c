@@ -95,7 +95,7 @@ scheduler(void)
         // 找到了一个可运行的进程，准备切换
         p->state = RUNNING;
         c->proc = p;
-
+        printf("scheduler: 进程 %d 开始运行\n", p->pid);
         // swtch是一个汇编函数, 它会保存当前上下文(调度器的上下文)
         // 到c->context, 然后恢复p->context指定的下一个进程的上下文
         // 从而实现进程切换。
