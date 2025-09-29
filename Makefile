@@ -19,7 +19,11 @@ SRC = \
 	kernel/kalloc.c \
 	kernel/vm.c \
 	kernel/string.c \
-	kernel/list.c
+	kernel/list.c \
+	kernel/trap/kernelvec.S \
+	kernel/trap/trap.c \
+	kernel/trap/timer.c \
+	kernel/trap/test.c
 
 
 # Object files

@@ -1,120 +1,60 @@
 #include "global_func.h"
 #include "memlayout.h"
 #include "paging.h"      // 引入 pagetable_t 与 dump_pagetable 原型
+#include "include/trap.h"
+#include "include/riscv.h"
 #include "types.h"
 
-// 读取time寄存器的内联函数
-static inline uint64 r_time()
-{
-    uint64 x;
-    asm volatile("csrr %0, time" : "=r" (x) );
-    return x;
-}
-
-// 简易断言宏, 条件为假时触发panic
-#define assert(x) do { if (!(x)) panic("assertion failed"); } while (0)
-
-int test_max_alloc() {
-    int count = 0;
-    while (kmalloc(sizeof(char)) != 0)
-    {
-        /* code */
-        count++;
-    }
-    printf("Max allocable blocks: %d\n", count);
-    return 0;
-}
-
-void test_many_alloc_free_timings() {
-    const int N = 50;
-    const int per_page = 5; // 每次分配5页
-    void* pages[N];
-    uint64 start_time, end_time;
-
-    // 分配N页
-    start_time = r_time();
-    for (int i = 0; i < N; i++) {
-        pages[i] = alloc_pages(per_page);
-        if (pages[i] == 0) {
-            printf("Allocation failed at %d\n", i);
-            break;
-        }
-    }
-    end_time = r_time();
-    printf("Allocated %d*%d pages in %d ticks\n", N, per_page, end_time - start_time);
-
-    // 释放N页
-    start_time = r_time();
-    for (int i = 0; i < N; i++) {
-        if (pages[i]) {
-            free_page(pages[i]);
-        }
-    }
-    end_time = r_time();
-    printf("Freed %d*%d pages in %d ticks\n", N, per_page,   end_time - start_time);
-}
-
-
-// Lab3: 物理内存分配器功能测试
-void test_physical_memory() {
-printf("\nTesting physical memory allocator...\n");
-
-// 测试基本分配和释放
-void *page1 = alloc_page();
-void *page2 = alloc_page();
-printf("alloc page1=%p page2=%p\n", page1, page2);
-assert(page1 != page2);
-assert(((uint64)page1 & 0xFFF) == 0);  // 页对齐检查
-assert(((uint64)page2 & 0xFFF) == 0);  // 页对齐检查
-printf("  - allocation and alignment test passed\n");
-
-// 测试数据写入
-*(int*)page1 = 0x12345678;
-assert(*(int*)page1 == 0x12345678);
-printf("  - data write test passed\n");
-
-// 测试释放和重新分配
-free_page(page1);
-printf("freed page1=%p\n", page1);
-void *page3 = alloc_page();
-printf("realloc page3=%p\n", page3);
-// page3可能等于page1（取决于分配策略）
-
-free_page(page2);
-free_page(page3);
-printf("Physical memory allocator tests passed!\n");
-}
+// 声明测试函数
+void run_all_tests(void);
+void default_timer_handler(void);
+void high_priority_timer_handler(void);
+void low_priority_timer_handler(void);
 
 // 内核主函数
 void main()
 {
-    clear_screen();
+    printf("Hello OS - Lab 4: Interrupt Handling\n");
 
-    printf("\n--- Running Lab 3 setup ---\n");
     pmm_init();         // 初始化物理内存管理器
-    test_physical_memory(); // 测试物理内存分配
+    
     kvm_init();         // 创建内核页表
     kvm_init_hart();    // 启用分页
-    // 调试: 打印当前内核页表结构 (Sv39 三层)
-    printf("\n--- Kernel pagetable dump ---\n");
-    dump_pagetable(kernel_pagetable, 2);
-    printf("--- End pagetable dump ---\n\n");
-    printf("--- Lab 3 setup finished, paging enabled ---\n");
 
-    printf("\n--- Running Lab 3 tests (post-paging) ---\n");
-    test_physical_memory(); // 在分页启用后再次测试物理内存分配
+    // 初始化中断系统
+    printf("Initializing interrupt system...\n");
+    trap_init();        // 初始化中断系统
+    trap_init_hart();   // 初始化当前hart的中断处理
+    timer_init();       // 初始化时钟中断（会自动注册system_timer_handler）
 
+    // 注册一些额外的时钟中断处理函数来演示共享中断
+    // 注意：system_timer_handler已经在timer_init()中注册
+    register_interrupt(IRQ_TIMER, default_timer_handler, "default_timer");
+    register_interrupt(IRQ_TIMER, low_priority_timer_handler, "low_priority_timer");
 
+    // 启用中断
+    enable_interrupt(IRQ_TIMER);
+    intr_on();
 
-    test_many_alloc_free_timings();
-    //test_max_alloc();
-    void *page4 = alloc_page();
-    //写入数据
-    *(int*)page4 = 0x87654321;
+    printf("Interrupt system initialized successfully\n");
+    printf("Starting interrupt tests...\n");
+
+    // 运行测试用例
+    run_all_tests();
+
+    printf("All tests completed\n");
     
-    destroy_pagetable(kernel_pagetable);
-    //asm volatile("sfence.vma zero, zero");
-    assert(*(int*)page4 == 0x87654321); // 检查数据是否仍然完整
-    printf("Kernel main completed. Halting.\n");
-    while(1);
+    // 保持系统运行，让时钟中断继续工作
+    printf("System is running... Press Ctrl+C to exit\n");
+    while (1) {
+        // 简单的空闲循环
+        for (volatile int i = 0; i < 10000000; i++);
+        
+        // 每隔一段时间打印系统状态
+        static int status_count = 0;
+        status_count++;
+        if (status_count % 500000 == 0) {
+            printf("System status: ticks=%lu, time=%lu\n", ticks, get_time());
+        }
+    }
 }

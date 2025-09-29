@@ -76,8 +76,12 @@ kvm_init()
   // 映射内核代码段 (R+X)
   mappages(kernel_pagetable, KERNBASE, (uint64)etext-KERNBASE, KERNBASE, PTE_R | PTE_X);
 
-  // 映射内核数据段和剩余物理内存 (R+W)
-  mappages(kernel_pagetable, (uint64)etext, PHYSTOP-(uint64)etext, (uint64)etext, PTE_R | PTE_W);
+  // 映射内核数据段，但故意留出一个未映射的区域用于测试页故障处理
+  // 映射从etext到0x85000000的区域
+  uint64 data_end = 0x85000000;  // 故意不映射0x85000000之后的区域
+  mappages(kernel_pagetable, (uint64)etext, data_end-(uint64)etext, (uint64)etext, PTE_R | PTE_W);
+  
+
 }
 
 // 启用分页 (加载内核页表到SATP寄存器)

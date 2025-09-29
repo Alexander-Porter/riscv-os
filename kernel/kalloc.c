@@ -427,3 +427,9 @@ void *alloc_pages(int count)
 {
   return kmalloc(count * PGSIZE);
 }
+
+// 释放由kmalloc分配的内存
+void kfree(void *p)
+{
+  free_page(p);
+}

@@ -24,3 +24,33 @@ void kvm_init_hart();
 
 // string.c
 void* memset(void*, int, uint);
+
+// trap.c - 中断处理相关函数
+void trap_init(void);
+void trap_init_hart(void);
+int register_interrupt(int irq, void (*handler)(void), const char *name);
+void unregister_interrupt(int irq, void (*handler)(void));
+void enable_interrupt(int irq);
+void disable_interrupt(int irq);
+void kerneltrap(void);
+int devintr(void);
+void handle_exception(uint64 cause, uint64 epc, uint64 tval);
+
+// timer.c - 时钟中断相关函数
+void timer_init(void);
+void timer_interrupt(void);
+uint64 get_time(void);
+void set_next_timer(uint64 interval);
+void default_timer_handler(void);
+void high_priority_timer_handler(void);
+void low_priority_timer_handler(void);
+
+// test.c - 测试函数
+void test_timer_interrupt(void);
+void test_nested_interrupt(void);
+void test_shared_interrupt(void);
+void test_exception_handling(void);
+void run_all_tests(void);
+
+// 全局变量声明
+extern volatile uint64 ticks;
