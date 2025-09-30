@@ -28,6 +28,8 @@
 #define MIE_STIE (1L << 5)  // supervisor timer
 
 // 中断原因码
+#define CAUSE_ILLEGAL_INSTRUCTION 2
+#define CAUSE_BREAKPOINT 3
 #define CAUSE_USER_ECALL    8
 #define CAUSE_SUPERVISOR_ECALL 9
 #define CAUSE_MACHINE_ECALL 11

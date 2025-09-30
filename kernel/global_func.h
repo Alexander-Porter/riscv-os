@@ -41,15 +41,8 @@ void timer_init(void);
 void timer_interrupt(void);
 uint64 get_time(void);
 void set_next_timer(uint64 interval);
-void default_timer_handler(void);
-void high_priority_timer_handler(void);
-void low_priority_timer_handler(void);
 
-// test.c - 测试函数
-void test_timer_interrupt(void);
-void test_nested_interrupt(void);
-void test_shared_interrupt(void);
-void test_exception_handling(void);
+
 void run_all_tests(void);
 
 // 全局变量声明

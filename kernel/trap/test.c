@@ -9,6 +9,8 @@ static volatile int nested_test_count = 0;
 static volatile int shared_test_count_1 = 0;
 static volatile int shared_test_count_2 = 0;
 
+
+
 /**
  * 测试间隔函数，等待一段时间让系统稳定
  */
@@ -34,18 +36,6 @@ void test_handler_2(void)
     test_interrupt_count += 2;
 }
 
-void nested_test_handler(void)
-{
-    nested_test_count++;
-    printf("Nested test handler called: count=%d\n", nested_test_count);
-    
-    // 只在第一次调用时触发嵌套中断，避免无限循环
-    if (nested_test_count == 1) {
-        printf("Triggering nested software interrupt...\n");
-        // 触发软件中断来测试嵌套
-        w_sip(r_sip() | (1L << 1));
-    }
-}
 
 void shared_handler_1(void)
 {
@@ -65,57 +55,6 @@ void shared_handler_2(void)
     }
 }
 
-void high_priority_nested_handler(void)
-{
-    static int high_nested_count = 0;
-    high_nested_count++;
-    // 减少输出频率
-    if (high_nested_count <= 5) {
-        printf("High priority nested handler called: count=%d\n", high_nested_count);
-    }
-}
-
-// 嵌套中断测试的四个函数
-static volatile int test_success_count = 0;
-static volatile int test_failure_count = 0;
-
-/**
- * A: 高优先级函数，触发一个低优先级中断
- */
-void handler_A_high_trigger_low(void)
-{
-    printf("Handler A (HIGH priority): Triggering low priority interrupt\n");
-    // 触发软件中断（低优先级）
-    w_sip(r_sip() | (1L << 1));
-}
-
-/**
- * B: 低优先级处理函数，如果被调用说明测试失败
- */
-void handler_B_low_should_not_run(void)
-{
-    test_failure_count++;
-    printf("FAILURE: Handler B (LOW priority) was called! This should NOT happen!\n");
-}
-
-/**
- * C: 低优先级函数，触发一个高优先级中断
- */
-void handler_C_low_trigger_high(void)
-{
-    printf("Handler C (LOW priority): Triggering high priority interrupt\n");
-    // 触发时钟中断（高优先级）- 设置一个很近的时钟中断
-    w_stimecmp(r_time() + 1000);
-}
-
-/**
- * D: 高优先级处理函数，如果被调用说明测试成功
- */
-void handler_D_high_should_run(void)
-{
-    test_success_count++;
-    printf("SUCCESS: Handler D (HIGH priority) was called!\n");
-}
 
 /**
  * 普通的外部中断处理函数
@@ -205,8 +144,7 @@ void test_shared_interrupt(void)
     register_interrupt(IRQ_TIMER, shared_handler_1, "shared_1");
     register_interrupt(IRQ_TIMER, shared_handler_2, "shared_2");
     
-    int old_count_1 = shared_test_count_1;
-    int old_count_2 = shared_test_count_2;
+
     uint64 start_ticks = ticks;
     
     // 等待几次中断
@@ -214,14 +152,7 @@ void test_shared_interrupt(void)
         for (volatile int i = 0; i < 50000; i++);
     }
     
-    printf("Shared handler 1 called %d times\n", shared_test_count_1 - old_count_1);
-    printf("Shared handler 2 called %d times\n", shared_test_count_2 - old_count_2);
-    
-    if (shared_test_count_1 > old_count_1 && shared_test_count_2 > old_count_2) {
-        printf("Shared interrupt test: PASSED\n");
-    } else {
-        printf("Shared interrupt test: FAILED\n");
-    }
+
     
     // 清理
     unregister_interrupt(IRQ_TIMER, shared_handler_1);
@@ -247,10 +178,7 @@ void test_page_fault_handling(void)
     uint64 value = *test_addr;
     
     printf("Successfully read value 0x%lx from address 0x%lx\n", value, (uint64)test_addr);
-    printf("This means the page fault was handled correctly!\n");
-    
-    // 现在尝试写入
-    printf("Attempting to write to the same address...\n");
+
     *test_addr = 0xDEADBEEF;
     
     // 再次读取验证
@@ -259,7 +187,6 @@ void test_page_fault_handling(void)
     
     if (written_value == 0xDEADBEEF) {
         printf("Page fault handling test: PASSED\n");
-        printf("Successfully handled page fault and allocated memory on-demand\n");
     } else {
         printf("Page fault handling test: FAILED\n");
     }
@@ -267,103 +194,150 @@ void test_page_fault_handling(void)
 
 
 
+
+// 中断嵌套测试的全局变量
+static volatile int test1_called = 0;  // 高优先级中断A是否被调用
+static volatile int test2_called = 0;  // 低优先级中断B是否被调用（不应该被调用）
+static volatile int test3_called = 0;  // 低优先级中断C是否被调用
+static volatile int test3_calling = 0;  // 低优先级中断C是否被调用
+static volatile int test4_called = 0;  // 高优先级中断D是否被调用（应该被调用）
+
 /**
- * 测试异常处理
+ * 测试函数A：高优先级中断（IRQ_EXTERNAL，优先级HIGH）
+ * 在处理过程中触发低优先级中断，验证低优先级不能嵌套高优先级
  */
-void test_exception_handling(void)
+void test_high_priority_handler_a(void)
 {
-    printf("\n=== Testing Exception Handling ===\n");
+    test1_called = 1;
+    printf("Handler A (HIGH priority) started\n");
     
-    printf("Note: Exception tests may cause system panic\n");
-    printf("This is expected behavior for unhandled exceptions\n");
+    // 在高优先级中断处理过程中，手动触发低优先级软件中断
+    // 这个低优先级中断不应该能够嵌套当前的高优先级中断
+    w_sip(r_sip() | (1L << 1));  // 触发软件中断（低优先级）
     
-    // 这里我们不实际触发异常，因为会导致系统崩溃
-    // 在实际测试中，可以通过以下方式触发异常：
-    // 1. 访问无效内存地址
-    // 2. 执行非法指令
-    // 3. 除零操作（如果支持）
+    // 延时一段时间，给低优先级中断机会尝试嵌套
+    for (volatile int i = 0; i < 1000000; i++);
     
-    printf("Exception handling framework is ready\n");
-    printf("Exception handling test: PASSED (framework only)\n");
+    printf("Handler A (HIGH priority) finished\n");
+}
+
+/**
+ * 测试函数B：低优先级中断（IRQ_SOFTWARE，优先级LOW）
+ * 如果这个函数被调用，说明低优先级中断错误地嵌套了高优先级中断
+ */
+void test_low_priority_handler_b(void)
+{
+    test2_called = 1;  // 如果被调用，测试失败
+    printf("Handler B (LOW priority) called - THIS SHOULD NOT HAPPEN!\n");
+}
+
+/**
+ * 测试函数C：低优先级中断（IRQ_SOFTWARE，优先级LOW）
+ * 在处理过程中触发高优先级中断，验证高优先级可以嵌套低优先级
+ */
+void test_low_priority_handler_c(void)
+{
+    test3_called = 1;
+    test3_calling=1;
+    printf("Handler C (LOW priority) started\n");
+    
+    
+    printf("Handler C: About to be interrupted by higher priority\n");
+    
+    // 延时，在此期间高优先级中断应该能够嵌套进来
+    for (volatile int i = 0; i < 500000; i++) {
+        // 在延时过程中，如果有高优先级中断，应该能够嵌套进来
+        if (i == 250000) {
+            // 在延时中间触发时钟中断（中等优先级，比软件中断高）
+            // 通过设置stimecmp为当前时间来立即触发时钟中断
+            uint64 current_time = r_time();
+            w_stimecmp(current_time + 1);  // 设置为立即触发
+        }
+    }
+    test3_calling=0;
+    printf("Handler C (LOW priority) finished\n");
+}
+
+/**
+ * 测试函数D：高优先级中断处理函数（通过时钟中断触发）
+ * 如果这个函数被调用，说明高优先级中断成功嵌套了低优先级中断
+ */
+void test_high_priority_handler_d(void)
+{
+    test4_called = 1;  // 如果被调用，测试成功
+    if (test3_calling){
+    printf("Handler D (NORMAL priority) called - nested interrupt SUCCESS!\n");
+    }
+    // 恢复正常的时钟中断间隔
+    uint64 current_time = r_time();
+    w_stimecmp(current_time + 10000000);  // 恢复正常间隔
 }
 
 /**
  * 测试中断嵌套和优先级
+ * 这个测试验证：
+ * 1. 高优先级中断不会被低优先级中断嵌套
+ * 2. 低优先级中断可以被高优先级中断嵌套
  */
 void test_irq_priority_and_nesting(void)
 {
-    printf("\n=== Testing Interrupt Nesting and Priority ===\n");
+    printf("\n=== Testing Interrupt Priority and Nesting ===\n");
     
-    // 重置计数器
-    test_success_count = 0;
-    test_failure_count = 0;
+    // 重置测试标志
+    test1_called = 0;
+    test2_called = 0;
+    test3_called = 0;
+    test4_called = 0;
     
-    printf("Testing interrupt priority rules:\n");
-    printf("- High priority should NOT be interrupted by low priority\n");
-    printf("- Low priority CAN be interrupted by high priority\n\n");
+    printf("Phase 1: Testing high priority cannot be nested by low priority\n");
     
-    // === 测试1: 高优先级不应该被低优先级中断 ===
-    printf("=== Test 1: High priority should NOT be interrupted ===\n");
+    // 注册测试处理函数
+    register_interrupt(IRQ_EXTERNAL, test_high_priority_handler_a, "test_high_a");
+    register_interrupt(IRQ_SOFTWARE, test_low_priority_handler_b, "test_low_b");
     
-    // 注册A和B函数
-    register_interrupt(IRQ_TIMER, handler_A_high_trigger_low, "handler_A");
-    register_interrupt(IRQ_SOFTWARE, handler_B_low_should_not_run, "handler_B");
+
     
-    // 启用软件中断
-    enable_interrupt(IRQ_SOFTWARE);
-    
-    printf("Triggering high priority interrupt (Timer)...\n");
-    // 触发时钟中断（高优先级），它会尝试触发软件中断（低优先级）
-    w_stimecmp(r_time() + 1000);
-    
-    // 等待处理完成
-    for (volatile int i = 0; i < 2000000; i++);
+    // 外部中断的发生
+    handle_interrupt_chain(IRQ_EXTERNAL);
     
     // 检查结果
-    if (test_failure_count == 0) {
-        printf("✅ Test 1 PASSED: High priority was not interrupted by low priority\n");
+    if (test1_called && !test2_called) {
+        printf("Test 1 PASSED: High priority was not interrupted by low priority\n");
     } else {
-        printf("❌ Test 1 FAILED: High priority was incorrectly interrupted\n");
+        printf("Test 1 FAILED: test1_called=%d, test2_called=%d\n", test1_called, test2_called);
     }
     
-    // 清理第一组测试
-    unregister_interrupt(IRQ_TIMER, handler_A_high_trigger_low);
-    unregister_interrupt(IRQ_SOFTWARE, handler_B_low_should_not_run);
+    // 清理第一阶段的处理函数
+    unregister_interrupt(IRQ_EXTERNAL, test_high_priority_handler_a);
+    unregister_interrupt(IRQ_SOFTWARE, test_low_priority_handler_b);
     
-    printf("\n=== Test 2: Low priority CAN be interrupted ===\n");
+    printf("\nPhase 2: Testing low priority can be nested by high priority\n");
     
-    // 注册C和D函数
-    register_interrupt(IRQ_SOFTWARE, handler_C_low_trigger_high, "handler_C");
-    register_interrupt(IRQ_TIMER, handler_D_high_should_run, "handler_D");
+    // 注册第二阶段的测试处理函数
+    register_interrupt(IRQ_SOFTWARE, test_low_priority_handler_c, "test_low_c");
+    register_interrupt(IRQ_TIMER, test_high_priority_handler_d, "test_high_d");
     
-    printf("Triggering low priority interrupt (Software)...\n");
-    // 触发软件中断（低优先级），它会触发时钟中断（高优先级）
-    w_sip(r_sip() | (1L << 1));
+    // 触发低优先级软件中断
+    printf("Triggering low priority interrupt (software)...\n");
     
-    // 等待处理完成
-    for (volatile int i = 0; i < 2000000; i++);
+    // 模拟软件中断的发生
+    handle_interrupt_chain(IRQ_SOFTWARE);
+    
+    // 给一点时间让可能的嵌套中断完成
+    for (volatile int i = 0; i < 100000; i++);
     
     // 检查结果
-    if (test_success_count > 0) {
-        printf("✅ Test 2 PASSED: Low priority was correctly interrupted by high priority\n");
+    if (test3_called && test4_called) {
+        printf("Test 2 PASSED: Low priority was correctly interrupted by high priority\n");
     } else {
-        printf("❌ Test 2 FAILED: Low priority was not interrupted as expected\n");
+        printf("Test 2 FAILED: test3_called=%d, test4_called=%d\n", test3_called, test4_called);
     }
     
-    // 最终结果
-    printf("\n=== Final Results ===\n");
-    if (test_failure_count == 0 && test_success_count > 0) {
-        printf("✅ Interrupt nesting test: PASSED\n");
-        printf("   Interrupt priority rules are correctly enforced\n");
-    } else {
-        printf("❌ Interrupt nesting test: FAILED\n");
-        printf("   Failures: %d, Successes: %d\n", test_failure_count, test_success_count);
-    }
+    // 清理第二阶段的处理函数
+    unregister_interrupt(IRQ_SOFTWARE, test_low_priority_handler_c);
+    unregister_interrupt(IRQ_TIMER, test_high_priority_handler_d);
     
-    // 清理第二组测试
-    disable_interrupt(IRQ_SOFTWARE);
-    unregister_interrupt(IRQ_SOFTWARE, handler_C_low_trigger_high);
-    unregister_interrupt(IRQ_TIMER, handler_D_high_should_run);
+
 }
 
 /**

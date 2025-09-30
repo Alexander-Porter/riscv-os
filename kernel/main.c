@@ -7,9 +7,7 @@
 
 // 声明测试函数
 void run_all_tests(void);
-void default_timer_handler(void);
-void high_priority_timer_handler(void);
-void low_priority_timer_handler(void);
+
 
 // 内核主函数
 void main()
@@ -26,11 +24,6 @@ void main()
     trap_init();        // 初始化中断系统
     trap_init_hart();   // 初始化当前hart的中断处理
     timer_init();       // 初始化时钟中断（会自动注册system_timer_handler）
-
-    // 注册一些额外的时钟中断处理函数来演示共享中断
-    // 注意：system_timer_handler已经在timer_init()中注册
-    register_interrupt(IRQ_TIMER, default_timer_handler, "default_timer");
-    register_interrupt(IRQ_TIMER, low_priority_timer_handler, "low_priority_timer");
 
     // 启用中断
     enable_interrupt(IRQ_TIMER);

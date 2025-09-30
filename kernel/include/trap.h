@@ -45,6 +45,7 @@ void disable_interrupt(int irq);
 // 中断处理函数
 void kerneltrap(void);
 int devintr(void);
+void handle_interrupt_chain(int irq);
 
 // 时钟中断相关
 void timer_init(void);
