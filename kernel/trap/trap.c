@@ -5,18 +5,27 @@
 #include "../types.h"
 #include "../paging.h"
 #include "../memlayout.h"
+#include "../proc.h"
 
 // 声明外部函数
 extern int mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm);
 extern void *alloc_page(void);
 extern void free_page(void *pa);
 extern void *memset(void *dst, int c, uint size);
+extern char trampoline[];
+extern char uservec[];
+extern char userret[];
+extern pagetable_t kernel_pagetable;
+extern void syscall(void);
 
 // 全局变量
 volatile uint64 ticks = 0;
 struct interrupt_desc *interrupt_table[MAX_IRQ_NUM];
 static int nested_level = 0;                        // 嵌套中断层级
 static int current_priority = IRQ_PRIORITY_LOW + 1; // 当前处理的中断优先级
+
+static void handle_user_exception(struct proc *p, uint64 cause, uint64 epc, uint64 tval);
+static int handle_cow_fault(struct proc *p, uint64 va);
 
 
 // 外部声明的汇编函数
@@ -222,21 +231,22 @@ void kerneltrap(void)
         panic("kerneltrap: interrupts enabled");
     }
 
-    // 增加嵌套层级
     nested_level++;
 
-    // 处理中断或异常
     int which_dev = devintr();
     if (which_dev == 0)
     {
-        // 异常处理
         handle_exception(scause, sepc, r_stval());
     }
+    else if (which_dev == IRQ_TIMER)
+    {
+        struct proc *p = myproc();
+        if (p != 0 && p->state == RUNNING && sched_should_yield(p))
+            yield();
+    }
 
-    // 减少嵌套层级
     nested_level--;
 
-    // 恢复寄存器
     w_sepc(sepc);
     w_sstatus(sstatus);
 }
@@ -319,11 +329,9 @@ int devintr(void)
     int irq = SCAUSE_TO_IRQ(scause);
 
     // 根据中断类型进行特殊处理
-    int skip_default_handle = 0;
     switch (irq)
     {
     case IRQ_TIMER:
-        // 时钟中断，无需特殊处理
         break;
     case IRQ_EXTERNAL:
         break;
@@ -336,11 +344,87 @@ int devintr(void)
         return 0;
     }
 
-    // 统一处理所有中断，优先级由注册的处理函数决定
-    if (!skip_default_handle) {
-        handle_interrupt_chain(irq);
-    }
+    handle_interrupt_chain(irq);
     return irq;
+}
+
+static void handle_user_exception(struct proc *p, uint64 cause, uint64 epc, uint64 tval)
+{
+    printf("usertrap: unexpected cause=0x%lx epc=0x%lx tval=0x%lx pid=%d\n", cause, epc, tval, p->pid);
+    setkilled(p);
+}
+
+void usertrap(void)
+{
+    if ((r_sstatus() & SSTATUS_SPP) != 0)
+        panic("usertrap: not from user mode");
+
+    w_stvec((uint64)kernelvec);
+
+    struct proc *p = myproc();
+    p->trapframe->epc = r_sepc();
+
+    uint64 scause = r_scause();
+    uint64 tval = r_stval();
+
+    int which_dev = 0;
+
+    if (scause == CAUSE_USER_ECALL)
+    {
+        if (killed(p))
+            exit(-1);
+
+        p->trapframe->epc += 4;
+        intr_on();
+        syscall();
+    }
+    else if (scause == CAUSE_STORE_PAGE_FAULT && handle_cow_fault(p, tval) == 0)
+    {
+        // COW 页面已处理，重新执行导致异常的指令
+    }
+    else if ((which_dev = devintr()) != 0)
+    {
+        // 设备中断已经处理
+    }
+    else
+    {
+        handle_user_exception(p, scause, p->trapframe->epc, tval);
+    }
+
+    if (killed(p))
+        exit(-1);
+
+    if (which_dev == IRQ_TIMER && sched_should_yield(p))
+        yield();
+
+    usertrapret();
+}
+
+void usertrapret(void)
+{
+    struct proc *p = myproc();
+
+    intr_off();
+
+    uint64 trampoline_uservec = TRAMPOLINE + (uint64)(uservec - trampoline);
+    w_stvec(trampoline_uservec);
+
+    p->trapframe->kernel_satp = MAKE_SATP(kernel_pagetable);
+    p->trapframe->kernel_sp = p->kstack + PGSIZE;
+    p->trapframe->kernel_trap = (uint64)usertrap;
+    p->trapframe->kernel_hartid = r_tp();
+
+    uint64 x = r_sstatus();
+    x &= ~SSTATUS_SPP;
+    x |= SSTATUS_SPIE;
+    w_sstatus(x);
+
+    w_sepc(p->trapframe->epc);
+
+    uint64 satp = MAKE_SATP(p->pagetable);
+    uint64 fn = TRAMPOLINE + (uint64)(userret - trampoline);
+    ((void (*)(uint64, uint64))fn)(satp, (uint64)p->trapframe);
+    panic("usertrapret: unreachable");
 }
 
 /**
@@ -473,4 +557,18 @@ uint64 get_time(void)
 void set_next_timer(uint64 interval)
 {
     w_stimecmp(r_time() + interval);
+}
+
+static int handle_cow_fault(struct proc *p, uint64 va)
+{
+    uint64 fault_page = PGROUNDDOWN(va);
+    printf("trap: pid %d COW fault va=0x%lx\n", p->pid, fault_page);
+    if (cow_allocpage(p->pagetable, fault_page) == 0)
+    {
+        printf("trap: pid %d COW handled va=0x%lx\n", p->pid, fault_page);
+        return 0;
+    }
+    printf("trap: pid %d COW failed va=0x%lx\n", p->pid, fault_page);
+    setkilled(p);
+    return -1;
 }

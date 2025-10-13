@@ -1,7 +1,9 @@
 #ifndef __RISCV_H
 #define __RISCV_H
 
+#ifndef __ASSEMBLER__
 #include "../types.h"
+#endif
 
 // RISC-V CSR 寄存器读写宏定义
 #define MSTATUS_MPP_MASK (3L << 11) // previous mode.
@@ -44,6 +46,8 @@
 #define IRQ_M_TIMER  7
 #define IRQ_S_EXT    9
 #define IRQ_M_EXT    11
+
+#ifndef __ASSEMBLER__
 
 // 读取CSR寄存器的宏
 static inline uint64
@@ -248,6 +252,20 @@ r_mcounteren()
   return x;
 }
 
+static inline uint64
+r_tp()
+{
+  uint64 x;
+  asm volatile("mv %0, tp" : "=r" (x));
+  return x;
+}
+
+static inline void
+w_tp(uint64 x)
+{
+  asm volatile("mv tp, %0" : : "r" (x));
+}
+
 static inline void 
 w_menvcfg(uint64 x)
 {
@@ -293,5 +311,10 @@ intr_get()
   uint64 x = r_sstatus();
   return (x & SSTATUS_SIE) != 0;
 }
+
+#endif // __ASSEMBLER__
+
+// Sv39 支持的最大虚拟地址（最高位保留符号位）
+#define MAXVA (1L << (9 + 9 + 9 + 12 - 1))
 
 #endif

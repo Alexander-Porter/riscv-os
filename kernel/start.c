@@ -36,6 +36,10 @@ void start()
     // 初始化时钟中断
     timer_init_machine();
 
+    // 将当前 hartid 写入 tp，后续 cpuid()/mycpu() 依赖该值
+    int id = r_mhartid();
+    w_tp(id);
+
     // 切换到监督模式并跳转到main()
     asm volatile("mret");
 }

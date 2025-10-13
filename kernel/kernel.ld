@@ -13,8 +13,11 @@ SECTIONS
     kernel/entry.o(_entry)
     *(.text .text.*)
     . = ALIGN(0x1000);
-    . += 0x2000; /* 额外增加 8KB 的空间 */
-     PROVIDE(etext = .);
+    _trampoline = .;
+    *(trampsec)
+    . = ALIGN(0x1000);
+    ASSERT(. - _trampoline == 0x1000, "trampoline larger than one page");
+    PROVIDE(etext = .);
   }
 
   .rodata : {

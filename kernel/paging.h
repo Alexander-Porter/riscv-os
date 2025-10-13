@@ -17,6 +17,7 @@ typedef uint64 pte_t; // 单个页表项
 #define PT_INDEX_BITS 9
 #define PT_ENTRIES    (1 << PT_INDEX_BITS)   // 512
 #define PT_LEVELS     3                      // Sv39 三级页表: level 2,1,0
+#define PX(level, va) VPN((va), (level))
 
 extern pagetable_t kernel_pagetable;
 
@@ -42,6 +43,10 @@ extern pagetable_t kernel_pagetable;
 #define PTE_W (1L << 2) // Write: 可写
 #define PTE_X (1L << 3) // Execute: 可执行
 #define PTE_U (1L << 4) // User: 用户态可访问
+#define PTE_A (1L << 6) // Accessed
+#define PTE_D (1L << 7) // Dirty
+#define PTE_COW (1L << 8) // Copy-on-write 标志 (软件定义)
+#define PTE_FLAGS(pte)  ((pte) & 0x3FF)
 
 
 // -------------------- SATP 寄存器 -------------------- 
@@ -77,6 +82,22 @@ static inline void sfence_vma() {
 void dump_pagetable(pagetable_t pt, int level);
 // 递归释放页表层级（不释放叶子映射的物理页本身）
 void destroy_pagetable(pagetable_t pt);
+
+// 用户态页表相关操作
+uint64 walkaddr(pagetable_t pagetable, uint64 va);
+pagetable_t uvmcreate(void);
+void uvminit(pagetable_t pagetable, uchar *src, int sz);
+uint64 uvmalloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz);
+uint64 uvmdealloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz);
+void uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free);
+void uvmfree(pagetable_t pagetable, uint64 sz);
+int uvmcopy(pagetable_t old, pagetable_t newp, uint64 sz);
+void uvmclear(pagetable_t pagetable, uint64 va);
+int copyout(pagetable_t pagetable, uint64 dstva, void *src, uint64 len);
+int copyin(pagetable_t pagetable, void *dst, uint64 srcva, uint64 len);
+int copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max);
+int mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm);
+int cow_allocpage(pagetable_t pagetable, uint64 va);
 
 
 #endif // __PAGING_H

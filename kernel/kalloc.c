@@ -2,27 +2,19 @@
 #include "memlayout.h"
 #include "global_func.h"
 #include "list.h"
+#include "spinlock.h"
 
 extern char end[]; // 由链接器定义, 指向内核数据段的末尾
 
 // 空闲块的链表节点直接使用块自身的内存(侵入式链表)
 // 链表是双向循环链表 (list.c/list.h)
 
-// 简易的自旋锁占位符, 当前版本是空实现, 不支持多核并发
-struct spinlock
-{
-  int dummy;
-};
-static inline void initlock(struct spinlock *lk, const char *name)
-{
-  (void)lk;
-  (void)name;
-}
-static inline void acquire(struct spinlock *lk) { (void)lk; }
-static inline void release(struct spinlock *lk) { (void)lk; }
-
-
 static int nsizes; // 块大小的种类数量 (k=0..nsizes-1)
+
+static struct spinlock ref_lock;  // 物理页引用计数锁
+static uint16 *page_ref;          // 每个物理页的引用计数
+static uint64 buddy_total_bytes;  // 伙伴系统管理的总字节数
+static uint64 total_pages;        // 管理的总页数 (按PGSIZE)
 
 #define LEAF_SIZE 128                                    // 最小块大小, 16字节
 #define MAXSIZE (nsizes - 1)                             // 最大块的阶
@@ -61,6 +53,24 @@ static uint64 freelist_bitmap;  // 新增: 用于快速查找非空闲链表的�
 #define bit_clear(array, index) do { \
     ((char *)(array))[(index) / 8] &= ~(1 << ((index) % 8)); \
 } while(0)
+
+static inline int is_page_aligned(uint64 pa)
+{
+  return (pa & (PGSIZE - 1)) == 0;
+}
+
+static inline int page_index_from_pa(uint64 pa)
+{
+  if (page_ref == 0)
+    return -1;
+  if (buddy_total_bytes == 0)
+    return -1;
+  if (pa < (uint64)bd_base || pa >= (uint64)bd_base + buddy_total_bytes)
+    return -1;
+  if (!is_page_aligned(pa))
+    return -1;
+  return (pa - (uint64)bd_base) / PGSIZE;
+}
 
 // ===== 地址与索引计算辅助函数 =====
 
@@ -252,6 +262,7 @@ static void bd_init(void *base, void *end)
   char *p = (char *)ROUNDUP((uint64)base, LEAF_SIZE); // 对齐我们的元数据起始地址
   int sz;
   initlock(&bd_lock, "buddy");
+  initlock(&ref_lock, "pageref");
   freelist_bitmap = 0; // 初始化位图为0
   bd_base = (void *)p; // 设置内存池基地址
 
@@ -286,6 +297,16 @@ static void bd_init(void *base, void *end)
     memset(bd_sizes[k].split, 0, sz);
     p += sz;
   }
+
+  buddy_total_bytes = BLK_SIZE(MAXSIZE);
+  total_pages = buddy_total_bytes / PGSIZE;
+  if (total_pages > 0)
+  {
+    page_ref = (uint16 *)p;
+    memset(page_ref, 0, total_pages * sizeof(uint16));
+    p += total_pages * sizeof(uint16);
+  }
+
   // 对齐元数据末尾
   p = (char *)ROUNDUP((uint64)p, LEAF_SIZE); 
 
@@ -365,41 +386,96 @@ static int size_of_block(char *p)
 // 释放内存
 void free_page(void *vp)
 {
+  if (vp == 0)
+    panic("free_page: null");
+
   void *q;
-  int k;
   char *p = (char *)vp;
 
   acquire(&bd_lock);
 
-  // 1. 确定要释放的块p的阶k
-  // 2. 循环向上合并
-  for (k = size_of_block(p); k < MAXSIZE; k++)
+  int blk_k = size_of_block(p);
+  int blk_sz = BLK_SIZE(blk_k);
+
+  if (blk_sz >= PGSIZE && page_ref != 0)
+  {
+    int pages = blk_sz / PGSIZE;
+    uint16 remaining = 0;
+    acquire(&ref_lock);
+    for (int i = 0; i < pages; i++)
+    {
+      int idx = page_index_from_pa((uint64)p + (uint64)i * PGSIZE);
+      if (idx < 0)
+        continue;
+      if (page_ref[idx] == 0)
+      {
+        release(&ref_lock);
+        release(&bd_lock);
+        panic("free_page: ref underflow");
+      }
+      page_ref[idx]--;
+      if (page_ref[idx] > remaining)
+        remaining = page_ref[idx];
+    }
+    release(&ref_lock);
+    if (remaining > 0)
+    {
+      release(&bd_lock);
+      return; // 仍有其他引用, 不释放物理页
+    }
+  }
+
+  int k;
+  for (k = blk_k; k < MAXSIZE; k++)
   {
     int bi = blk_index(k, p);
     int buddy = (bi % 2) == 0 ? bi + 1 : bi - 1; // 计算伙伴块的索引
 
     bit_xor_pair(bd_sizes[k].alloc, bi); // 翻转XOR位, 标记p为"空闲"
 
-    // 检查伙伴块是否也空闲 (如果XOR位为1, 说明伙伴块是已分配的)
     if (bit_isset_pair(bd_sizes[k].alloc, buddy))
       break; // 伙伴块已分配, 停止合并
 
-    // 3. 伙伴块空闲, 进行合并
-    q = addr(k, buddy);           // 获取伙伴块的地址
-    lst_remove((struct list *)q); // 从空闲链表中移除伙伴块
-    if(lst_empty(&bd_sizes[k].free)) clear_freelist_bit(k); // 更新位图
+    q = addr(k, buddy);
+    lst_remove((struct list *)q);
+    if (lst_empty(&bd_sizes[k].free))
+      clear_freelist_bit(k);
 
-    // 选择地址较小的块作为合并后大块的基地址
     if (buddy % 2 == 0)
       p = q;
-    // 清除父块的分裂标记
     bit_clear(bd_sizes[k + 1].split, blk_index(k + 1, p));
   }
 
-  // 4. 将最终合并的块或未合并的块加入对应阶的空闲链表
-  if(lst_empty(&bd_sizes[k].free)) set_freelist_bit(k); // 更新位图
+  if (lst_empty(&bd_sizes[k].free))
+    set_freelist_bit(k);
   lst_push(&bd_sizes[k].free, p);
   release(&bd_lock);
+}
+
+void incref_page(void *pa)
+{
+  int idx = page_index_from_pa((uint64)pa);
+  if (idx < 0)
+    return;
+  acquire(&ref_lock);
+  if (page_ref[idx] == 0xFFFF)
+  {
+    release(&ref_lock);
+    panic("incref_page overflow");
+  }
+  page_ref[idx]++;
+  release(&ref_lock);
+}
+
+int pageref(void *pa)
+{
+  int idx = page_index_from_pa((uint64)pa);
+  if (idx < 0)
+    return 0;
+  acquire(&ref_lock);
+  int ref = page_ref[idx];
+  release(&ref_lock);
+  return ref;
 }
 
 // ===== 兼容旧接口的包装函数 =====
@@ -419,13 +495,38 @@ void pmm_init()
 // 分配单个物理页
 void *alloc_page()
 {
-  return kmalloc(PGSIZE);
+  void *p = kmalloc(PGSIZE);
+  if (p && page_ref != 0)
+  {
+    int idx = page_index_from_pa((uint64)p);
+    if (idx >= 0)
+    {
+      acquire(&ref_lock);
+      page_ref[idx] = 1;
+      release(&ref_lock);
+    }
+  }
+  return p;
 }
 
 // 分配2^order个连续的物理页
 void *alloc_pages(int count)
 {
-  return kmalloc(count * PGSIZE);
+  if (count <= 0)
+    return 0;
+  void *p = kmalloc(count * PGSIZE);
+  if (p && page_ref != 0)
+  {
+    acquire(&ref_lock);
+    for (int i = 0; i < count; i++)
+    {
+      int idx = page_index_from_pa((uint64)p + (uint64)i * PGSIZE);
+      if (idx >= 0)
+        page_ref[idx] = 1;
+    }
+    release(&ref_lock);
+  }
+  return p;
 }
 
 // 释放由kmalloc分配的内存

@@ -13,6 +13,8 @@ void pmm_init();
 void* alloc_page(void);
 void free_page(void*);
 void* alloc_pages(int order);   // 新增: 分配 2^order 个连续页, 返回物理基地址或0
+void incref_page(void *pa);
+int pageref(void *pa);
 // small object allocator
 void* kmalloc(uint64 size);
 void kfree(void* p);
@@ -24,6 +26,11 @@ void kvm_init_hart();
 
 // string.c
 void* memset(void*, int, uint);
+void* memmove(void*, const void*, int);
+char* safestrcpy(char*, const char*, int);
+int strncmp(const char*, const char*, uint);
+int strlen(const char*);
+int strcmp(const char*, const char*);
 
 // trap.c - 中断处理相关函数
 void trap_init(void);

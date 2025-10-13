@@ -3,6 +3,8 @@
 
 #include "../types.h"
 
+struct trapframe;
+
 // 中断处理函数类型
 typedef void (*interrupt_handler_t)(void);
 
@@ -46,6 +48,8 @@ void disable_interrupt(int irq);
 void kerneltrap(void);
 int devintr(void);
 void handle_interrupt_chain(int irq);
+void usertrap(void);
+void usertrapret(void);
 
 // 时钟中断相关
 void timer_init(void);
