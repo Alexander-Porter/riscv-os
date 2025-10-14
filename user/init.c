@@ -16,19 +16,15 @@ int main(void)
 {
     // 依次运行的用户程序列表
     static const char *const tests[] = {
-        "testsyscall",
-        "testfork",
-        "testsched",
-        "testsem",
+        "testsyscall2",
+        "testprocess",
         "testcow",
     };
 
-    printf("init: entering test harness\n");
 
     for (unsigned i = 0; i < sizeof(tests) / sizeof(tests[0]); i++)
     {
         int pid = fork();
-        printf("init: after fork pid=%d (self=%d) for %s\n", pid, getpid(), tests[i]);
         if (pid < 0)
         {
             printf("init: fork for %s failed\n", tests[i]);

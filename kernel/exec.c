@@ -117,7 +117,6 @@ int do_exec(uint64 path_addr, uint64 argv_addr)
 
     if (copyinstr(p->pagetable, prog_name, path_addr, sizeof(prog_name)) < 0)
         return -1;
-    printf("exec: pid %d path=0x%lx name=%s\n", p->pid, path_addr, prog_name);
 
     const struct user_program *prog = find_user_program(prog_name);
     if (prog == 0)

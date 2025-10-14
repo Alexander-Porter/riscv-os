@@ -57,5 +57,5 @@ void timer_init_machine()
     w_mcounteren(r_mcounteren() | 2);
     
     // 请求第一次时钟中断
-    w_stimecmp(r_time() + 1000000);
+    w_stimecmp(r_time() + 10000);
 }

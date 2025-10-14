@@ -562,10 +562,10 @@ void set_next_timer(uint64 interval)
 static int handle_cow_fault(struct proc *p, uint64 va)
 {
     uint64 fault_page = PGROUNDDOWN(va);
-    printf("trap: pid %d COW fault va=0x%lx\n", p->pid, fault_page);
+    //printf("trap: pid %d COW fault va=0x%lx\n", p->pid, fault_page);
     if (cow_allocpage(p->pagetable, fault_page) == 0)
     {
-        printf("trap: pid %d COW handled va=0x%lx\n", p->pid, fault_page);
+        //printf("trap: pid %d COW handled va=0x%lx\n", p->pid, fault_page);
         return 0;
     }
     printf("trap: pid %d COW failed va=0x%lx\n", p->pid, fault_page);

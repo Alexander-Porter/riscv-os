@@ -75,6 +75,18 @@ getrunticks:
     ecall
     ret
 
+    .globl rdtime
+rdtime:
+    li a7, SYS_rdtime
+    ecall
+    ret
+
+    .globl uptime
+uptime:
+    li a7, SYS_uptime
+    ecall
+    ret
+
     .globl sbrk
 sbrk:
     li a7, SYS_sbrk

@@ -100,7 +100,7 @@ struct proc {
     struct trapframe *trapframe;
     struct context context;
     char name[16];
-    int priority;          // 动态优先级，数值越小优先级越高
+    int priority;          // 优先级，数值越小优先级越高
     int time_slice;        // 当前时间片已累计的tick数
     uint64 ready_time;     // 进入RUNNABLE状态的时间戳
     uint64 run_ticks;      // 历史运行tick统计

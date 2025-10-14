@@ -74,6 +74,8 @@ extern uint64 sys_getrunticks(void);
 extern uint64 sys_sem_create(void);
 extern uint64 sys_sem_wait(void);
 extern uint64 sys_sem_post(void);
+extern uint64 sys_rdtime(void);
+extern uint64 sys_uptime(void);
 
 static uint64 (*syscalls[])(void) = {
     [SYS_exit] = sys_exit,
@@ -92,6 +94,8 @@ static uint64 (*syscalls[])(void) = {
     [SYS_sem_create] = sys_sem_create,
     [SYS_sem_wait] = sys_sem_wait,
     [SYS_sem_post] = sys_sem_post,
+    [SYS_rdtime] = sys_rdtime,
+    [SYS_uptime] = sys_uptime,
 };
 
 void syscall(void)

@@ -23,6 +23,8 @@ int yield(void);
 int setpriority(int prio);
 int getpriority(void);
 uint64 getrunticks(void);
+uint64 rdtime(void);
+uint64 uptime(void);
 char *sbrk(int n);
 int sem_create(int initial);
 int sem_wait(int semid);

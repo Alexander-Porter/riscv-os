@@ -27,6 +27,66 @@ static int allocpid(void);
 static int timeslice_for_priority(int priority);
 static void promote_waiting_process(struct proc *p);
 
+#define PROC_DEBUG_INTERVAL 5
+
+static int proc_created_total = 0;
+
+static const char *proc_state_name(enum procstate state)
+{
+    switch (state)
+    {
+    case UNUSED:
+        return "UNUSED";
+    case USED:
+        return "USED";
+    case SLEEPING:
+        return "SLEEPING";
+    case RUNNABLE:
+        return "RUNNABLE";
+    case RUNNING:
+        return "RUNNING";
+    case ZOMBIE:
+        return "ZOMBIE";
+    default:
+        return "UNKNOWN";
+    }
+}
+
+static void debug_proc_table(void)
+{
+    printf("debug_proc_table: total_created=%d\n", proc_created_total);
+    for (struct proc *p = proc; p < &proc[NPROC]; p++)
+    {
+        acquire(&p->lock);
+        enum procstate state = p->state;
+        int pid = p->pid;
+        int priority = p->priority;
+        uint64 runtime = p->run_ticks;
+        char name[sizeof(p->name)];
+        if (state != UNUSED)
+        {
+            memmove(name, p->name, sizeof(name));
+            release(&p->lock);
+            name[sizeof(name) - 1] = '\0';
+            printf("  pid=%d state=%s priority=%d runticks=%lu name=%s\n",
+                   pid, proc_state_name(state), priority, runtime, name);
+        }
+        else
+        {
+            release(&p->lock);
+        }
+    }
+}
+
+static void proc_note_creation(void)
+{
+    proc_created_total++;
+    if (proc_created_total % PROC_DEBUG_INTERVAL == 0)
+    {
+        debug_proc_table();
+    }
+}
+
 struct cpu cpus[NCPU];
 struct proc proc[NPROC];
 static struct proc *initproc;        // 第一个用户进程
@@ -63,13 +123,21 @@ struct proc *myproc(void)
     return p;
 }
 
-static int timeslice_for_priority(int priority)
-{
+// 时间片计算: 高优先级(小数值)获得更长的时间片
+// 设计理由: 高优先级任务更重要,应该获得更多CPU时间以便快速完成
+// 优先级0(最高): BASE_TIMESLICE * 4 = 16 ticks ≈ 160ms
+// 优先级1(中等): BASE_TIMESLICE * 2 = 8 ticks ≈ 80ms
+// 优先级2(最低): BASE_TIMESLICE * 1 = 4 ticks ≈ 40ms
+static int timeslice_for_priority(int priority) {
+    // 边界检查
     if (priority < PRIORITY_MIN)
         priority = PRIORITY_MIN;
     if (priority > PRIORITY_MAX)
         priority = PRIORITY_MAX;
-    return BASE_TIMESLICE << priority;
+    
+    // 反转优先级映射: 优先级越小(越重要),level越大,时间片越长
+    int level = (MAX_PRIORITY - 1) - priority;
+    return BASE_TIMESLICE << level;  // 等价于 BASE_TIMESLICE * 2^level
 }
 
 static void promote_waiting_process(struct proc *p)
@@ -232,6 +300,8 @@ void userinit(void)
     p->ready_time = ticks;
     p->state = RUNNABLE;
     release(&p->lock);
+
+    proc_note_creation();
 }
 
 int growproc(int n)
@@ -280,6 +350,8 @@ int fork(void)
     np->run_ticks = 0;
     np->state = RUNNABLE;
     release(&np->lock);
+
+    proc_note_creation();
 
     return np->pid;
 }

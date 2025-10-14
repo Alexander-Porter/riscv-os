@@ -95,8 +95,13 @@ uint64 sys_write(void)
         return -1;
     if (fd != 1 && fd != 2)
         return -1;
+    if (src == 0 && n > 0)
+        return -1;
 
     struct proc *p = myproc();
+    if (p == 0)
+        return -1;
+    
     int written = 0;
     char buf[128];
     while (written < n)
@@ -112,6 +117,7 @@ uint64 sys_write(void)
     }
     return written;
 }
+
 
 uint64 sys_yield(void)
 {
@@ -135,6 +141,16 @@ uint64 sys_getpriority(void)
 uint64 sys_getrunticks(void)
 {
     return getrunticks();
+}
+
+uint64 sys_rdtime(void)
+{
+    return r_time();
+}
+
+uint64 sys_uptime(void)
+{
+    return ticks;
 }
 
 uint64 sys_sem_create(void)

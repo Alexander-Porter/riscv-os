@@ -5,7 +5,7 @@
 #include "../types.h"
 
 
-#define TIMER_INTERVAL 100000
+#define TIMER_INTERVAL 50000
 
 
 /**

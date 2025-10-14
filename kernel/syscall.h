@@ -32,6 +32,8 @@
 #define SYS_sem_create 26
 #define SYS_sem_wait 27
 #define SYS_sem_post 28
+#define SYS_uptime 29
+#define SYS_rdtime 29
 
 #ifndef __ASSEMBLER__
 void syscall(void);
