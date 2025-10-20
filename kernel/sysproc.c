@@ -118,6 +118,36 @@ uint64 sys_write(void)
     return written;
 }
 
+// 以下文件相关系统调用目前未实现文件系统：
+// 为了参数与 ABI 对齐，提供空实现以返回错误码 -1。
+uint64 sys_open(void)
+{
+    // int open(const char *path, int mode);
+    // 参数解析保持与 xv6 一致
+    uint64 path; int mode;
+    if (argaddr(0, &path) < 0 || argint(1, &mode) < 0)
+        return (uint64)-1;
+    return (uint64)-1;
+}
+
+uint64 sys_close(void)
+{
+    // int close(int fd);
+    int fd;
+    if (argint(0, &fd) < 0)
+        return (uint64)-1;
+    return (uint64)-1;
+}
+
+uint64 sys_read(void)
+{
+    // int read(int fd, void *buf, int n);
+    int fd, n; uint64 dst;
+    if (argint(0, &fd) < 0 || argaddr(1, &dst) < 0 || argint(2, &n) < 0)
+        return (uint64)-1;
+    return (uint64)-1;
+}
+
 
 uint64 sys_yield(void)
 {

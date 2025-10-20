@@ -59,7 +59,7 @@ $(INITCODE_OBJ): $(INITCODE_BIN)
 
 
 # 用户态通用对象与程序
-USER_COMMON_OBJ = user/start.o user/syscall.o user/lib.o user/printf.o
+USER_COMMON_OBJ = user/start.o user/usys.o user/lib.o user/printf.o
 USER_PROGS = init  testsyscall2 testprocess testcow
 USER_PROG_OBJ = $(addprefix user/, $(addsuffix .o, $(USER_PROGS)))
 USER_OUT = $(addprefix user/, $(addsuffix .out, $(USER_PROGS)))
@@ -81,6 +81,10 @@ user/%.o: user/%.c
 
 user/%.o: user/%.S
 	$(CC) $(USER_CFLAGS) -c -o $@ $<
+
+# 允许从 usys.pl 生成 usys.S（可选）
+user/usys.S: user/usys.pl kernel/syscall.h
+	perl $< kernel/syscall.h > $@
 
 # Compilation flags
 CFLAGS = -Wall -Og -g -ffreestanding -nostdlib -mcmodel=medany
