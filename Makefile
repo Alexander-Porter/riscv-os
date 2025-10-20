@@ -60,7 +60,7 @@ $(INITCODE_OBJ): $(INITCODE_BIN)
 
 # 用户态通用对象与程序
 USER_COMMON_OBJ = user/start.o user/usys.o user/lib.o user/printf.o
-USER_PROGS = init  testsyscall2 testprocess testcow
+USER_PROGS = init  testsyscall2 testprocess testcow testsbrkbench
 USER_PROG_OBJ = $(addprefix user/, $(addsuffix .o, $(USER_PROGS)))
 USER_OUT = $(addprefix user/, $(addsuffix .out, $(USER_PROGS)))
 USER_BIN = $(addprefix user/, $(addsuffix .bin, $(USER_PROGS)))

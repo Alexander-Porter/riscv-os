@@ -311,9 +311,15 @@ int growproc(int n)
 
     if (n > 0)
     {
+#if ENABLE_LAZY_SBRK
+        // Lazy allocation: 仅调整进程大小，实际物理页在缺页时按需分配
+        sz = sz + (uint64)n;
+#else
+        // Eager allocation: 立即分配并映射物理页，行为与原实现一致
         sz = uvmalloc(p->pagetable, sz, sz + n);
         if (sz == 0)
             return -1;
+#endif
     }
     else if (n < 0)
     {

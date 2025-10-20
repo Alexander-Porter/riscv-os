@@ -19,6 +19,7 @@ int main(void)
         "testsyscall2",
         "testprocess",
         "testcow",
+        "testsbrkbench",
     };
 
 

@@ -10,12 +10,15 @@ extern uchar _binary_user_testcow_bin_start[];
 extern uchar _binary_user_testcow_bin_end[];
 extern uchar _binary_user_testprocess_bin_start[];
 extern uchar _binary_user_testprocess_bin_end[];
+extern uchar _binary_user_testsbrkbench_bin_start[];
+extern uchar _binary_user_testsbrkbench_bin_end[];
 
 static const struct user_program user_program_table[] = {
     {"init", _binary_user_init_bin_start, _binary_user_init_bin_end},
     {"testsyscall2", _binary_user_testsyscall2_bin_start, _binary_user_testsyscall2_bin_end},
     {"testcow", _binary_user_testcow_bin_start, _binary_user_testcow_bin_end},
     {"testprocess", _binary_user_testprocess_bin_start, _binary_user_testprocess_bin_end},
+    {"testsbrkbench", _binary_user_testsbrkbench_bin_start, _binary_user_testsbrkbench_bin_end},
 };
 
 const struct user_program *find_user_program(const char *name)

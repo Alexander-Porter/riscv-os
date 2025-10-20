@@ -26,6 +26,9 @@ static int current_priority = IRQ_PRIORITY_LOW + 1; // 当前处理的中断优�
 
 static void handle_user_exception(struct proc *p, uint64 cause, uint64 epc, uint64 tval);
 static int handle_cow_fault(struct proc *p, uint64 va);
+#if ENABLE_LAZY_SBRK
+static int handle_lazy_alloc(struct proc *p, uint64 va);
+#endif
 
 
 // 外部声明的汇编函数
@@ -378,17 +381,27 @@ void usertrap(void)
         intr_on();
         syscall();
     }
-    else if (scause == CAUSE_STORE_PAGE_FAULT && handle_cow_fault(p, tval) == 0)
-    {
-        // COW 页面已处理，重新执行导致异常的指令
-    }
     else if ((which_dev = devintr()) != 0)
     {
         // 设备中断已经处理
     }
     else
     {
-        handle_user_exception(p, scause, p->trapframe->epc, tval);
+        // 尝试 COW, 再尝试懒分配（sbrk lazy）
+        int handled = -1;
+        if (scause == CAUSE_STORE_PAGE_FAULT || scause == CAUSE_LOAD_PAGE_FAULT)
+        {
+            // 先尝试可选的懒分配（若启用）
+#if ENABLE_LAZY_SBRK
+            if (handle_lazy_alloc(p, tval) == 0)
+                handled = 0;
+#endif
+            // 再尝试 COW：针对已有映射但标记为 COW 的页
+            if (handled != 0 && handle_cow_fault(p, tval) == 0)
+                handled = 0;
+        }
+        if (handled != 0)
+            handle_user_exception(p, scause, p->trapframe->epc, tval);
     }
 
     if (killed(p))
@@ -572,3 +585,28 @@ static int handle_cow_fault(struct proc *p, uint64 va)
     setkilled(p);
     return -1;
 }
+
+// 懒分配：对落在 [0, p->sz) 且尚未映射的用户页，分配并映射零页
+#if ENABLE_LAZY_SBRK
+static int handle_lazy_alloc(struct proc *p, uint64 va)
+{
+    uint64 fault = PGROUNDDOWN(va);
+    if (fault >= p->sz)
+        return -1; // 超出进程大小
+
+    // 检查是否已映射
+    pagetable_t pt = p->pagetable;
+    extern void *alloc_page(void);
+    extern int mappages(pagetable_t, uint64, uint64, uint64, int);
+    if (walkaddr(pt, fault) != 0)
+        return 0; // 已映射，视为处理完成
+
+    char *mem = alloc_page();
+    if (mem == 0)
+        return -1;
+    memset(mem, 0, PGSIZE);
+    if (mappages(pt, fault, PGSIZE, (uint64)mem, PTE_U | PTE_R | PTE_W) < 0)
+        return -1;
+    return 0;
+}
+#endif
