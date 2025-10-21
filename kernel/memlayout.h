@@ -1,6 +1,8 @@
 #ifndef __MEMLAYOUT_H
 #define __MEMLAYOUT_H
 
+#include "param.h"
+
 // 内核内存布局定义
 
 #define KERNBASE 0x80000000L                 // 内核基地址
@@ -21,5 +23,12 @@
 #define TRAMPOLINE (MAXVA - PGSIZE)
 #define TRAPFRAME  (TRAMPOLINE - PGSIZE)
 #define KSTACK(i)  (TRAMPOLINE - ((i) + 1) * 2 * PGSIZE)
+
+// 共享内存区域：位于所有内核栈下方，向下预留 1 页作为缓冲
+#define SHM_MAX_PAGES 64
+#define SHM_RESERVED_PAGES (NPROC * 2)
+#define SHM_BASE (TRAMPOLINE - (SHM_RESERVED_PAGES + SHM_MAX_PAGES + 1) * PGSIZE)
+#define SHM_TOP  (SHM_BASE + SHM_MAX_PAGES * PGSIZE)
+
 
 #endif // __MEMLAYOUT_H

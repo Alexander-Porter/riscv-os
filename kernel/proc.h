@@ -5,6 +5,7 @@
 #include "param.h"
 #include "spinlock.h"
 #include "paging.h"
+#include "memlayout.h"
 
 struct trapframe;
 
@@ -23,6 +24,14 @@ struct context {
     uint64 s9;
     uint64 s10;
     uint64 s11;
+};
+
+#define PROC_SHM_MAX SHM_MAX_PAGES
+
+struct shm_mapping {
+    uint64 va;   // 映射到用户空间的虚拟地址
+    int shmid;   // 共享内存编号
+    int used;    // 是否有效
 };
 
 struct cpu {
@@ -104,6 +113,8 @@ struct proc {
     int time_slice;        // 当前时间片已累计的tick数
     uint64 ready_time;     // 进入RUNNABLE状态的时间戳
     uint64 run_ticks;      // 历史运行tick统计
+    struct shm_mapping shm_regions[PROC_SHM_MAX]; // 当前进程持有的共享页
+    int shm_region_count;  // 共享页数量
 };
 
 extern struct proc proc[NPROC];

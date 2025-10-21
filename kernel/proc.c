@@ -7,6 +7,7 @@
 #include "paging.h"
 #include "global_func.h"
 #include "exec.h"
+#include "shm.h"
 
 #define MAX_PRIORITY 3
 #define BASE_TIMESLICE 4
@@ -183,6 +184,13 @@ void procinit(void)
         p->time_slice = 0;
         p->ready_time = 0;
         p->run_ticks = 0;
+        p->shm_region_count = 0;
+        for (int j = 0; j < PROC_SHM_MAX; j++)
+        {
+            p->shm_regions[j].used = 0;
+            p->shm_regions[j].shmid = -1;
+            p->shm_regions[j].va = 0;
+        }
     }
 }
 
@@ -212,6 +220,13 @@ static void freeproc(struct proc *p)
     p->ready_time = 0;
     p->run_ticks = 0;
     p->state = UNUSED;
+    p->shm_region_count = 0;
+    for (int i = 0; i < PROC_SHM_MAX; i++)
+    {
+        p->shm_regions[i].used = 0;
+        p->shm_regions[i].shmid = -1;
+        p->shm_regions[i].va = 0;
+    }
 }
 
 static struct proc *allocproc(void)
@@ -248,6 +263,13 @@ static struct proc *allocproc(void)
             p->time_slice = 0;
             p->ready_time = ticks;
             p->run_ticks = 0;
+            p->shm_region_count = 0;
+            for (int i = 0; i < PROC_SHM_MAX; i++)
+            {
+                p->shm_regions[i].used = 0;
+                p->shm_regions[i].shmid = -1;
+                p->shm_regions[i].va = 0;
+            }
             return p;
         }
         release(&p->lock);
@@ -344,6 +366,12 @@ int fork(void)
         release(&np->lock);
         return -1;
     }
+    if (shm_clone_mappings(p, np) < 0)
+    {
+        freeproc(np);
+        release(&np->lock);
+        return -1;
+    }
     np->sz = p->sz;
 
     *(np->trapframe) = *(p->trapframe);
@@ -370,6 +398,8 @@ void exit(int status)
 
     if (p == initproc)
         panic("init exiting");
+
+    shm_cleanup_process(p);
 
     acquire(&wait_lock);
 

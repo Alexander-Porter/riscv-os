@@ -6,6 +6,7 @@
 #include "global_func.h"
 #include "exec.h"
 #include "semaphore.h"
+#include "shm.h"
 
 extern volatile uint64 ticks;
 
@@ -205,4 +206,30 @@ uint64 sys_sem_post(void)
     if (argint(0, &semid) < 0)
         return (uint64)-1;
     return (uint64)semaphore_release(semid);
+}
+
+uint64 sys_shm_create(void)
+{
+    return (uint64)shm_create();
+}
+
+uint64 sys_shm_get(void)
+{
+    int shmid;
+    if (argint(0, &shmid) < 0)
+        return (uint64)-1;
+    uint64 va = 0;
+    if (shm_map_for_proc(myproc(), shmid, &va) < 0)
+        return (uint64)-1;
+    return va;
+}
+
+uint64 sys_shm_unmap(void)
+{
+    uint64 addr;
+    if (argaddr(0, &addr) < 0)
+        return (uint64)-1;
+    if (shm_unmap_for_proc(myproc(), addr) < 0)
+        return (uint64)-1;
+    return 0;
 }

@@ -5,6 +5,7 @@
 #include "proc.h"
 #include "global_func.h"
 #include "user_programs.h"
+#include "shm.h"
 
 extern volatile uint64 ticks;
 
@@ -19,6 +20,8 @@ static void free_kargv(char *kargv[], int count)
 
 static int install_user_program(struct proc *p, const struct user_program *prog, char *kargv[], int argc)
 {
+    shm_cleanup_process(p);
+
     pagetable_t pagetable = proc_pagetable(p);
     if (pagetable == 0)
         return -1;

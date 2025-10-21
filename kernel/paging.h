@@ -46,6 +46,7 @@ extern pagetable_t kernel_pagetable;
 #define PTE_A (1L << 6) // Accessed
 #define PTE_D (1L << 7) // Dirty
 #define PTE_COW (1L << 8) // Copy-on-write 标志 (软件定义)
+#define PTE_SHARED (1L << 9) // 共享内存标志 (软件定义)
 #define PTE_FLAGS(pte)  ((pte) & 0x3FF)
 
 

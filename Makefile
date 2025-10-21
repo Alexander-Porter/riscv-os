@@ -28,6 +28,7 @@ SRC = \
 	kernel/exec.c \
 	kernel/user_programs.c \
 	kernel/semaphore.c \
+	kernel/shm.c \
 	kernel/swtch.S \
 	kernel/trampoline.S \
 	kernel/trap/kernelvec.S \

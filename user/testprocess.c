@@ -5,28 +5,68 @@
 
 #define BUFFER_CAPACITY 4
 
-static int buffer[BUFFER_CAPACITY];
-static int write_index = 0;
-static int read_index = 0;
+struct shared_buffer
+{
+    int buffer[BUFFER_CAPACITY];
+    int write_index;
+    int read_index;
+};
+
+static struct shared_buffer *shared = 0;
+static int shmid = -1;
 static int sem_empty = -1;
 static int sem_full = -1;
 static int sem_mutex = -1;
 
-static void shared_buffer_init(void)
+static int shared_buffer_init(void)
 {
-    sem_empty = sem_create(BUFFER_CAPACITY);
-    sem_full = sem_create(0);
-    sem_mutex = sem_create(1);
-    write_index = 0;
-    read_index = 0;
+    if (shmid < 0)
+    {
+        shmid = shm_create();
+        if (shmid < 0)
+        {
+            printf("shared_buffer_init: shm_create failed\n");
+            return -1;
+        }
+    }
+
+    if (shared == 0)
+    {
+        shared = (struct shared_buffer *)shm_get(shmid);
+        if (shared == 0)
+        {
+            printf("shared_buffer_init: shm_get failed\n");
+            return -1;
+        }
+    }
+
+    if (sem_empty < 0)
+        sem_empty = sem_create(BUFFER_CAPACITY);
+    if (sem_full < 0)
+        sem_full = sem_create(0);
+    if (sem_mutex < 0)
+        sem_mutex = sem_create(1);
+
+    if (sem_empty < 0 || sem_full < 0 || sem_mutex < 0)
+        return -1;
+
+    shared->write_index = 0;
+    shared->read_index = 0;
+    for (int i = 0; i < BUFFER_CAPACITY; i++)
+        shared->buffer[i] = 0;
+    return 0;
 }
 
 static void shared_buffer_put(int value)
 {
     sem_wait(sem_empty);
     sem_wait(sem_mutex);
-    buffer[write_index % BUFFER_CAPACITY] = value;
-    write_index++;
+    if (shared)
+    {
+        int slot = shared->write_index % BUFFER_CAPACITY;
+        shared->buffer[slot] = value;
+        shared->write_index++;
+    }
     sem_post(sem_mutex);
     sem_post(sem_full);
 }
@@ -35,8 +75,13 @@ static int shared_buffer_get(void)
 {
     sem_wait(sem_full);
     sem_wait(sem_mutex);
-    int value = buffer[read_index % BUFFER_CAPACITY];
-    read_index++;
+    int value = 0;
+    if (shared)
+    {
+        int slot = shared->read_index % BUFFER_CAPACITY;
+        value = shared->buffer[slot];
+        shared->read_index++;
+    }
     sem_post(sem_mutex);
     sem_post(sem_empty);
     return value;
@@ -143,10 +188,9 @@ int test_scheduler(void)
 int test_synchronization(void)
 {
     printf("test_synchronization: begin\n");
-    shared_buffer_init();
-    if (sem_empty < 0 || sem_full < 0 || sem_mutex < 0)
+    if (shared_buffer_init() < 0)
     {
-        printf("test_synchronization: semaphore create failed\n");
+        printf("test_synchronization: shared buffer init failed\n");
         return -1;
     }
 
@@ -178,17 +222,23 @@ int test_synchronization(void)
     int status = 0;
     wait(&status);
     printf("test_synchronization: child status=%d\n", status);
+    if (shared)
+    {
+        shm_unmap(shared);
+        shared = 0;
+        shmid = -1;
+    }
     return 0;
 }
 
 int main(void)
 {
     test_process_creation();
-    sleep(500);
+    sleep(250);
     test_scheduler();
-    sleep(1500);
-    test_synchronization();
     sleep(500);
+    test_synchronization();
+    sleep(250);
     printf("testprocess: done\n");
     exit(0);
 }

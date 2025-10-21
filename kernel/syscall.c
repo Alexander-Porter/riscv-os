@@ -46,6 +46,7 @@ int argint(int n, int *ip)
 
 int argaddr(int n, uint64 *ip)
 {
+    //校验指针
     *ip = argraw(n);
     return 0;
 }
@@ -79,6 +80,9 @@ extern uint64 sys_sem_wait(void);
 extern uint64 sys_sem_post(void);
 extern uint64 sys_rdtime(void);
 extern uint64 sys_uptime(void);
+extern uint64 sys_shm_create(void);
+extern uint64 sys_shm_get(void);
+extern uint64 sys_shm_unmap(void);
 
 static uint64 (*syscalls[])(void) = {
     [SYS_exit] = sys_exit,
@@ -102,6 +106,9 @@ static uint64 (*syscalls[])(void) = {
     [SYS_sem_post] = sys_sem_post,
     [SYS_rdtime] = sys_rdtime,
     [SYS_uptime] = sys_uptime,
+    [SYS_shm_create] = sys_shm_create,
+    [SYS_shm_get] = sys_shm_get,
+    [SYS_shm_unmap] = sys_shm_unmap,
 };
 
 void syscall(void)

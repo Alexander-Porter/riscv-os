@@ -89,13 +89,13 @@ int test_syscall_performance(void)
 int main(void)
 {
     test_basic_syscalls();
-    sleep(500);
+    sleep(250);
     test_parameter_passing();
-    sleep(500);
+    sleep(250);
     test_security();
-    sleep(500);
+    sleep(250);
     test_syscall_performance();
-    sleep(500);
+    sleep(250);
     printf("testsyscall2: done\n");
     exit(0);
 }

@@ -12,7 +12,7 @@
 #define PROG_NAME_MAX 32  // 用户程序名称最大长度
 #define USERSTACK_PAGES 1 // 用户栈使用的页数量
 
-// 可选特性：懒分配 sbrk
+// 懒分配 sbrk
 #ifndef ENABLE_LAZY_SBRK
 #define ENABLE_LAZY_SBRK 1
 #endif

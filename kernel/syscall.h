@@ -25,6 +25,9 @@
 #define SYS_sem_post 28
 // extended
 #define SYS_rdtime  29
+#define SYS_shm_create 30
+#define SYS_shm_get 31
+#define SYS_shm_unmap 32
 
 #ifndef __ASSEMBLER__
 void syscall(void);

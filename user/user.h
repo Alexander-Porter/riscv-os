@@ -29,6 +29,9 @@ char *sbrk(int n);
 int sem_create(int initial);
 int sem_wait(int semid);
 int sem_post(int semid);
+int shm_create(void);
+void *shm_get(int shmid);
+int shm_unmap(void *addr);
 
 // 基础库函数
 void *memset(void *dst, int c, size_t n);

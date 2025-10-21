@@ -6,6 +6,7 @@
 #include "proc.h"
 #include "types.h"
 #include "semaphore.h"
+#include "shm.h"
 
 // 内核主函数
 void main()
@@ -18,6 +19,7 @@ void main()
 
     procinit();         // 初始化进程表
     semaphore_system_init(); // 初始化内核同步原语
+    shm_system_init();       // 初始化共享内存管理
 
     trap_init();        // 初始化中断/异常子系统
     trap_init_hart();   // 安装监督态陷阱向量

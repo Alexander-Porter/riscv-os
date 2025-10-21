@@ -128,3 +128,21 @@ rdtime:
 	ecall
 	ret
 
+	.globl shm_create
+shm_create:
+	li a7, SYS_shm_create
+	ecall
+	ret
+
+	.globl shm_get
+shm_get:
+	li a7, SYS_shm_get
+	ecall
+	ret
+
+	.globl shm_unmap
+shm_unmap:
+	li a7, SYS_shm_unmap
+	ecall
+	ret
+
