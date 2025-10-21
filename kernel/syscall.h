@@ -3,7 +3,6 @@
 
 #include "types.h"
 
-// 系统调用号，参考 xv6 的定义，保留常见子集便于扩展
 #define SYS_fork    1
 #define SYS_exit    2
 #define SYS_wait    3

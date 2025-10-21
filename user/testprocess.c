@@ -184,8 +184,11 @@ int test_synchronization(void)
 int main(void)
 {
     test_process_creation();
+    sleep(500);
     test_scheduler();
+    sleep(1500);
     test_synchronization();
+    sleep(500);
     printf("testprocess: done\n");
     exit(0);
 }

@@ -599,14 +599,16 @@ static int handle_lazy_alloc(struct proc *p, uint64 va)
     extern void *alloc_page(void);
     extern int mappages(pagetable_t, uint64, uint64, uint64, int);
     if (walkaddr(pt, fault) != 0)
-        return 0; // 已映射，视为处理完成
+        return -1; // 已映射，非懒分配场景，交由其他处理（如 COW）
 
     char *mem = alloc_page();
     if (mem == 0)
         return -1;
     memset(mem, 0, PGSIZE);
-    if (mappages(pt, fault, PGSIZE, (uint64)mem, PTE_U | PTE_R | PTE_W) < 0)
+    if (mappages(pt, fault, PGSIZE, (uint64)mem, PTE_U | PTE_R | PTE_W) < 0) {
+        free_page(mem);
         return -1;
+    }
     return 0;
 }
 #endif

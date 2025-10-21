@@ -16,9 +16,9 @@ int main(void)
 {
     // 依次运行的用户程序列表
     static const char *const tests[] = {
-        "testsyscall2",
         "testprocess",
         "testcow",
+        "testsyscall2",
         "testsbrkbench",
     };
 
@@ -34,7 +34,6 @@ int main(void)
 
         if (pid == 0)
         {
-            printf("init: launching %p (%s)\n", tests[i], tests[i]);
             run_child(tests[i]);
         }
 

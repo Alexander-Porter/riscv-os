@@ -2,7 +2,7 @@
 
 #define PAGE 4096
 // 选择较保守的页数，确保在10s超时内完成并留出其他测试开销
-#define N_PAGES 256
+#define N_PAGES 2560
 
 static inline uint64 tstart(void) { return rdtime(); }
 static inline uint64 tend(void) { return rdtime(); }

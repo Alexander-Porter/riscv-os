@@ -2,8 +2,6 @@
 use strict;
 use warnings;
 
-# 从 kernel/syscall.h 解析 `#define SYS_name`，生成RISC-V系统调用桩
-# 兼容行内注释与额外空白，忽略未实现/未注册的名称由调用方控制（生成不代表内核实现）。
 
 my $hdr = $ARGV[0] // "../kernel/syscall.h";  # 允许通过参数传入
 open my $fh, '<', $hdr or die "failed to open $hdr: $!";

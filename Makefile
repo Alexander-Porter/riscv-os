@@ -82,7 +82,7 @@ user/%.o: user/%.c
 user/%.o: user/%.S
 	$(CC) $(USER_CFLAGS) -c -o $@ $<
 
-# 允许从 usys.pl 生成 usys.S（可选）
+
 user/usys.S: user/usys.pl kernel/syscall.h
 	perl $< kernel/syscall.h > $@
 
@@ -110,16 +110,18 @@ $(KERNEL_ELF): $(OBJ) $(EXTRA_USER_OBJ)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 # Clean up
+.PHONY: all clean qemu qemu-gdb
+
 clean:
 	rm -f $(KERNEL_ELF) $(KERNEL_BIN) $(OBJ) \
 		$(INITCODE_OBJ) $(INITCODE_BIN) $(INITCODE_OUT) user/initcode.o \
 		$(USER_COMMON_OBJ) $(USER_PROG_OBJ) $(USER_OUT) $(USER_BIN) $(USER_OBJ_BIN)
 
-# Run QEMU
-qemu: $(KERNEL_BIN)
+# Run QEMU (clean first)
+qemu: clean $(KERNEL_BIN)
 	$(QEMU) -machine virt -nographic -kernel $(KERNEL_ELF) -bios none 
 
-# Run QEMU for GDB debugging
-qemu-gdb: $(KERNEL_ELF)
+# Run QEMU for GDB debugging (clean first)
+qemu-gdb: clean $(KERNEL_ELF)
 	@echo "Starting QEMU for GDB debugging. Connect GDB to localhost:1234"
 	$(QEMU) -machine virt -nographic -kernel $(KERNEL_ELF) -s -S -bios none

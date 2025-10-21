@@ -257,19 +257,21 @@ static struct proc *allocproc(void)
 
 pagetable_t proc_pagetable(struct proc *p)
 {
-    pagetable_t pagetable = uvmcreate();
+    pagetable_t pagetable = uvmcreate(); // 创建空页表
     if (pagetable == 0)
         return 0;
 
+    // 映射内核的TRAMPOLINE代码段
     if (mappages(pagetable, TRAMPOLINE, PGSIZE, (uint64)trampoline, PTE_R | PTE_X) < 0)
     {
         uvmfree(pagetable, 0);
         return 0;
     }
 
+    // 映射进程的陷阱帧
     if (mappages(pagetable, TRAPFRAME, PGSIZE, (uint64)p->trapframe, PTE_R | PTE_W) < 0)
     {
-        uvmunmap(pagetable, TRAMPOLINE, 1, 0);
+        uvmunmap(pagetable, TRAMPOLINE, 1, 0); // 清理已映射的TRAMPOLINE
         uvmfree(pagetable, 0);
         return 0;
     }
@@ -394,30 +396,30 @@ void exit(int status)
 
 int wait(int *status)
 {
-    struct proc *p = myproc();
+    struct proc *p = myproc();  // 获取当前进程
     int havekids;
 
-    acquire(&wait_lock);
+    acquire(&wait_lock);  // 获取等待锁，保护进程列表
 
     for (;;)
     {
         havekids = 0;
-        for (struct proc *pp = proc; pp < &proc[NPROC]; pp++)
+        for (struct proc *pp = proc; pp < &proc[NPROC]; pp++)  // 遍历所有进程
         {
-            if (pp->parent == p)
+            if (pp->parent == p)  // 检查是否为当前进程的子进程
             {
                 havekids = 1;
-                acquire(&pp->lock);
-                if (pp->state == ZOMBIE)
+                acquire(&pp->lock);  // 获取子进程锁
+                if (pp->state == ZOMBIE)  // 子进程已结束但未回收
                 {
                     int pid = pp->pid;
                     if (status != 0 && copyout(p->pagetable, (uint64)status, &pp->xstate, sizeof(pp->xstate)) < 0)
-                    {
+                    {  // 将退出状态复制到用户空间，如果失败则返回错误
                         release(&pp->lock);
                         release(&wait_lock);
                         return -1;
                     }
-                    freeproc(pp);
+                    freeproc(pp);  // 释放子进程资源
                     release(&pp->lock);
                     release(&wait_lock);
                     return pid;
@@ -426,13 +428,13 @@ int wait(int *status)
             }
         }
 
-        if (!havekids || p->killed)
+        if (!havekids || p->killed)  // 无子进程或当前进程被杀死
         {
             release(&wait_lock);
             return -1;
         }
 
-        sleep(p, &wait_lock);
+        sleep(p, &wait_lock);  // 睡眠等待子进程结束，释放锁
     }
 }
 
@@ -480,8 +482,6 @@ int sched_should_yield(struct proc *p)
 
     if (p->time_slice >= timeslice_for_priority(p->priority))
     {
-        if (p->priority < PRIORITY_MAX)
-            p->priority++;
         p->time_slice = 0;
         p->ready_time = ticks;
         return 1;
@@ -661,7 +661,6 @@ void forkret(void)
     if (first)
     {
         first = 0;
-        // 这里可挂载一次性初始化逻辑（当前实验暂不需要）
     }
 
     usertrapret();

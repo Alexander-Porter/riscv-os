@@ -38,7 +38,7 @@ void system_timer_handler(void)
     set_next_timer(TIMER_INTERVAL);
     
     // 每500次中断打印一次信息，减少输出频率
-    if (ticks % 500 == 0) {
-        printf("Timer interrupt: ticks=%lu\n", ticks);
-    }
+    //if (ticks % 500 == 0) {
+    //    printf("Timer interrupt: ticks=%lu\n", ticks);
+    //}
 }
