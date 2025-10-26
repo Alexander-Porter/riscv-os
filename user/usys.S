@@ -146,3 +146,45 @@ shm_unmap:
 	ecall
 	ret
 
+	.globl dup
+dup:
+	li a7, SYS_dup
+	ecall
+	ret
+
+	.globl pipe
+pipe:
+	li a7, SYS_pipe
+	ecall
+	ret
+
+	.globl fstat
+fstat:
+	li a7, SYS_fstat
+	ecall
+	ret
+
+	.globl chdir
+chdir:
+	li a7, SYS_chdir
+	ecall
+	ret
+
+	.globl mkdir
+mkdir:
+	li a7, SYS_mkdir
+	ecall
+	ret
+
+	.globl unlink
+unlink:
+	li a7, SYS_unlink
+	ecall
+	ret
+
+	.globl link
+link:
+	li a7, SYS_link
+	ecall
+	ret
+

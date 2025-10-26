@@ -8,6 +8,8 @@
 #include "global_func.h"
 #include "exec.h"
 #include "shm.h"
+#include "file.h"
+#include "fs.h"
 
 #define MAX_PRIORITY 3
 #define BASE_TIMESLICE 4
@@ -191,6 +193,9 @@ void procinit(void)
             p->shm_regions[j].shmid = -1;
             p->shm_regions[j].va = 0;
         }
+        for (int j = 0; j < NOFILE; j++)
+            p->ofile[j] = 0;
+        p->cwd = 0;
     }
 }
 
@@ -227,6 +232,9 @@ static void freeproc(struct proc *p)
         p->shm_regions[i].shmid = -1;
         p->shm_regions[i].va = 0;
     }
+    for (int i = 0; i < NOFILE; i++)
+        p->ofile[i] = 0;
+    p->cwd = 0;
 }
 
 static struct proc *allocproc(void)
@@ -270,6 +278,9 @@ static struct proc *allocproc(void)
                 p->shm_regions[i].shmid = -1;
                 p->shm_regions[i].va = 0;
             }
+            for (int i = 0; i < NOFILE; i++)
+                p->ofile[i] = 0;
+            p->cwd = 0;
             return p;
         }
         release(&p->lock);
@@ -319,6 +330,32 @@ void userinit(void)
     if (exec_program_for_proc(p, "init", argv, 1) < 0)
         panic("userinit: exec init failed");
 
+    begin_op();
+    struct inode *cwd = namei("/");
+    if (cwd == 0)
+        panic("userinit: no root");
+    p->cwd = cwd;
+    end_op();
+
+    struct file *f0 = filealloc();
+    struct file *f1 = filealloc();
+    if (f0 == 0 || f1 == 0)
+        panic("userinit: filealloc");
+
+    f0->type = FD_DEVICE;
+    f0->readable = 1;
+    f0->writable = 0;
+    f0->major = CONSOLE;
+
+    f1->type = FD_DEVICE;
+    f1->readable = 0;
+    f1->writable = 1;
+    f1->major = CONSOLE;
+
+    p->ofile[0] = f0;
+    p->ofile[1] = f1;
+    p->ofile[2] = filedup(f1);
+
     p->priority = PRIORITY_MIN;
     p->time_slice = 0;
     p->ready_time = ticks;
@@ -340,7 +377,7 @@ int growproc(int n)
         sz = sz + (uint64)n;
 #else
         // Eager allocation: 立即分配并映射物理页，行为与原实现一致
-        sz = uvmalloc(p->pagetable, sz, sz + n);
+    sz = uvmalloc(p->pagetable, sz, sz + n, PTE_R | PTE_W | PTE_U);
         if (sz == 0)
             return -1;
 #endif
@@ -380,6 +417,13 @@ int fork(void)
     np->parent = p;
     safestrcpy(np->name, p->name, sizeof(np->name));
 
+    for (int i = 0; i < NOFILE; i++)
+        if (p->ofile[i])
+            np->ofile[i] = filedup(p->ofile[i]);
+        else
+            np->ofile[i] = 0;
+    np->cwd = p->cwd ? idup(p->cwd) : 0;
+
     np->priority = p->priority;
     np->time_slice = 0;
     np->ready_time = ticks;
@@ -398,6 +442,24 @@ void exit(int status)
 
     if (p == initproc)
         panic("init exiting");
+
+    for (int fd = 0; fd < NOFILE; fd++)
+    {
+        if (p->ofile[fd])
+        {
+            struct file *f = p->ofile[fd];
+            fileclose(f);
+            p->ofile[fd] = 0;
+        }
+    }
+
+    begin_op();
+    if (p->cwd)
+    {
+        iput(p->cwd);
+        p->cwd = 0;
+    }
+    end_op();
 
     shm_cleanup_process(p);
 
@@ -500,6 +562,36 @@ uint64 getrunticks(void)
     uint64 ticks_used = p->run_ticks;
     release(&p->lock);
     return ticks_used;
+}
+
+int either_copyout(int user_dst, uint64 dst, void *src, uint64 len)
+{
+    struct proc *p = myproc();
+    if (user_dst)
+    {
+        if (copyout(p->pagetable, dst, src, len) < 0)
+            return -1;
+    }
+    else
+    {
+        memmove((char *)dst, src, len);
+    }
+    return 0;
+}
+
+int either_copyin(void *dst, int user_src, uint64 src, uint64 len)
+{
+    struct proc *p = myproc();
+    if (user_src)
+    {
+        if (copyin(p->pagetable, dst, src, len) < 0)
+            return -1;
+    }
+    else
+    {
+        memmove(dst, (char *)src, len);
+    }
+    return 0;
 }
 
 int sched_should_yield(struct proc *p)

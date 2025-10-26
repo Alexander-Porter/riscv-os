@@ -7,6 +7,11 @@ int uart_getc(void);
 void uart_init(void);
 int printf(char *fmt, ...);
 void clear_screen(void);
+void console_init(void);
+void console_putc(int c);
+void console_puts(const char *s);
+int console_write(const char *buf, int n);
+int console_read(char *buf, int n);
 
 // kalloc.c
 void pmm_init();

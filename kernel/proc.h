@@ -8,6 +8,8 @@
 #include "memlayout.h"
 
 struct trapframe;
+struct file;
+struct inode;
 
 struct context {
     uint64 ra;
@@ -115,6 +117,8 @@ struct proc {
     uint64 run_ticks;      // 历史运行tick统计
     struct shm_mapping shm_regions[PROC_SHM_MAX]; // 当前进程持有的共享页
     int shm_region_count;  // 共享页数量
+    struct file *ofile[NOFILE]; // 打开文件表
+    struct inode *cwd;          // 当前工作目录
 };
 
 extern struct proc proc[NPROC];
@@ -143,5 +147,7 @@ int sched_should_yield(struct proc *p);
 int setpriority(int priority);
 int getpriority(void);
 uint64 getrunticks(void);
+int either_copyout(int user_dst, uint64 dst, void *src, uint64 len);
+int either_copyin(void *dst, int user_src, uint64 src, uint64 len);
 
 #endif

@@ -4,10 +4,36 @@
 #include "paging.h"
 #include "proc.h"
 #include "global_func.h"
-#include "user_programs.h"
+#include "fs.h"
+#include "file.h"
+#include "elf.h"
 #include "shm.h"
 
-extern volatile uint64 ticks;
+static int flags2perm(int flags)
+{
+    int perm = PTE_U;
+    if (flags & 0x1)
+        perm |= PTE_X;
+    if (flags & 0x2)
+        perm |= PTE_W;
+    return perm | PTE_R;
+}
+
+static int loadseg(pagetable_t pagetable, uint64 va, struct inode *ip, uint offset, uint sz)
+{
+    for (uint i = 0; i < sz; i += PGSIZE)
+    {
+        uint64 pa = walkaddr(pagetable, va + i);
+        if (pa == 0)
+            panic("loadseg: address should exist");
+        uint n = PGSIZE;
+        if (sz - i < PGSIZE)
+            n = sz - i;
+        if (readi(ip, 0, pa, offset + i, n) != (int)n)
+            return -1;
+    }
+    return 0;
+}
 
 static void free_kargv(char *kargv[], int count)
 {
@@ -18,115 +44,12 @@ static void free_kargv(char *kargv[], int count)
     }
 }
 
-static int install_user_program(struct proc *p, const struct user_program *prog, char *kargv[], int argc)
-{
-    shm_cleanup_process(p);
-
-    pagetable_t pagetable = proc_pagetable(p);
-    if (pagetable == 0)
-        return -1;
-
-    uint64 prog_size = (uint64)(prog->end - prog->start);
-    uint64 mapped_sz = 0;
-
-    for (uint64 off = 0; off < prog_size || (prog_size == 0 && off == 0); off += PGSIZE)
-    {
-        char *mem = alloc_page();
-        if (mem == 0)
-            goto load_fail;
-        memset(mem, 0, PGSIZE);
-
-        uint64 copy_sz = PGSIZE;
-        if (prog_size > 0)
-        {
-            if (prog_size - off < PGSIZE)
-                copy_sz = prog_size - off;
-            memmove(mem, prog->start + off, copy_sz);
-        }
-
-        if (mappages(pagetable, off, PGSIZE, (uint64)mem, PTE_R | PTE_W | PTE_X | PTE_U) != 0)
-        {
-            free_page(mem);
-            goto load_fail;
-        }
-        mapped_sz = off + PGSIZE;
-        if (prog_size == 0)
-            break;
-    }
-
-
-    uint64 sz = PGROUNDUP(mapped_sz > 0 ? mapped_sz : prog_size);
-    if (sz == 0)
-        sz = PGSIZE;
-
-    uint64 newsz = uvmalloc(pagetable, sz, sz + (USERSTACK_PAGES + 1) * PGSIZE);
-    if (newsz == 0)
-        goto load_fail;
-    uvmclear(pagetable, newsz - (USERSTACK_PAGES + 1) * PGSIZE);
-    mapped_sz = newsz;
-
-    uint64 sp = newsz;
-    uint64 stackbase = sp - USERSTACK_PAGES * PGSIZE;
-    uint64 ustack[MAXARG + 1];
-
-    for (int i = 0; i < argc; i++)
-    {
-        int len = strlen(kargv[i]) + 1;
-        sp -= len;
-        sp &= ~((uint64)15);
-        if (sp < stackbase)
-            goto load_fail;
-        if (copyout(pagetable, sp, kargv[i], len) < 0)
-            goto load_fail;
-        ustack[i] = sp;
-    }
-    ustack[argc] = 0;
-
-    sp -= (argc + 1) * sizeof(uint64);
-    sp &= ~((uint64)15);
-    if (sp < stackbase)
-        goto load_fail;
-    if (copyout(pagetable, sp, ustack, (argc + 1) * sizeof(uint64)) < 0)
-        goto load_fail;
-
-    struct trapframe *tf = p->trapframe;
-    tf->epc = 0;
-    tf->sp = sp;
-    tf->a0 = argc;
-    tf->a1 = sp;
-
-    pagetable_t old = p->pagetable;
-    uint64 oldsz = p->sz;
-
-    p->pagetable = pagetable;
-    p->sz = newsz;
-    safestrcpy(p->name, prog->name, sizeof(p->name));
-    p->time_slice = 0;
-    p->ready_time = ticks;
-    p->run_ticks = 0;
-
-    proc_freepagetable(old, oldsz);
-    return 0;
-
-load_fail:
-    proc_freepagetable(pagetable, mapped_sz);
-    return -1;
-}
-
 int do_exec(uint64 path_addr, uint64 argv_addr)
 {
     struct proc *p = myproc();
-    char prog_name[PROG_NAME_MAX];
-
-    if (copyinstr(p->pagetable, prog_name, path_addr, sizeof(prog_name)) < 0)
+    char path[MAXPATH];
+    if (copyinstr(p->pagetable, path, path_addr, sizeof(path)) < 0)
         return -1;
-
-    const struct user_program *prog = find_user_program(prog_name);
-    if (prog == 0)
-    {
-        printf("exec: program %s not found\n", prog_name);
-        return -1;
-    }
 
     char *kargv[MAXARG];
     for (int i = 0; i < MAXARG; i++)
@@ -137,7 +60,7 @@ int do_exec(uint64 path_addr, uint64 argv_addr)
     {
         for (; argc < MAXARG; argc++)
         {
-            uint64 uarg;
+            uint64 uarg = 0;
             if (copyin(p->pagetable, &uarg, argv_addr + argc * sizeof(uint64), sizeof(uint64)) < 0)
             {
                 free_kargv(kargv, argc);
@@ -158,27 +81,136 @@ int do_exec(uint64 path_addr, uint64 argv_addr)
             }
         }
     }
+    kargv[argc] = 0;
 
-    if (argc == MAXARG)
+    begin_op();
+    struct inode *ip = namei(path);
+    if (ip == 0)
     {
+        end_op();
         free_kargv(kargv, argc);
         return -1;
     }
 
-    int rc = install_user_program(p, prog, kargv, argc);
+    ilock(ip);
+    struct elfhdr elf;
+    if (readi(ip, 0, (uint64)&elf, 0, sizeof(elf)) != sizeof(elf))
+        goto bad;
+    if (elf.magic != ELF_MAGIC)
+        goto bad;
+
+    shm_cleanup_process(p);
+
+    pagetable_t pagetable = proc_pagetable(p);
+    if (pagetable == 0)
+        goto bad;
+
+    uint64 sz = 0;
+    struct proghdr ph;
+    for (int i = 0, off = elf.phoff; i < elf.phnum; i++, off += sizeof(ph))
+    {
+        if (readi(ip, 0, (uint64)&ph, off, sizeof(ph)) != sizeof(ph))
+            goto load_bad;
+        if (ph.type != ELF_PROG_LOAD)
+            continue;
+        if (ph.memsz < ph.filesz)
+            goto load_bad;
+        if (ph.vaddr + ph.memsz < ph.vaddr)
+            goto load_bad;
+        if (ph.vaddr % PGSIZE != 0)
+            goto load_bad;
+    uint64 sz1 = uvmalloc(pagetable, sz, ph.vaddr + ph.memsz, flags2perm(ph.flags));
+        if (sz1 == 0)
+            goto load_bad;
+        sz = sz1;
+        if (loadseg(pagetable, ph.vaddr, ip, ph.off, ph.filesz) < 0)
+            goto load_bad;
+    }
+
+    iunlockput(ip);
+    end_op();
+    ip = 0;
+
+    sz = PGROUNDUP(sz);
+    uint64 sz1 = uvmalloc(pagetable, sz, sz + (USERSTACK_PAGES + 1) * PGSIZE, PTE_W | PTE_R | PTE_U);
+    if (sz1 == 0)
+        goto load_bad_cleanup;
+    sz = sz1;
+    uvmclear(pagetable, sz - (USERSTACK_PAGES + 1) * PGSIZE);
+
+    uint64 sp = sz;
+    uint64 stackbase = sp - USERSTACK_PAGES * PGSIZE;
+    uint64 ustack[MAXARG + 1];
+
+    for (int i = argc - 1; i >= 0; i--)
+    {
+        int len = strlen(kargv[i]) + 1;
+        sp -= len;
+        sp &= ~((uint64)15);
+        if (sp < stackbase)
+            goto load_bad_cleanup;
+        if (copyout(pagetable, sp, kargv[i], len) < 0)
+            goto load_bad_cleanup;
+        ustack[i] = sp;
+    }
+    ustack[argc] = 0;
+
+    sp -= (argc + 1) * sizeof(uint64);
+    sp &= ~((uint64)15);
+    if (sp < stackbase)
+        goto load_bad_cleanup;
+    if (copyout(pagetable, sp, ustack, (argc + 1) * sizeof(uint64)) < 0)
+        goto load_bad_cleanup;
+
+    struct trapframe *tf = p->trapframe;
+    uint64 oldsz = p->sz;
+    pagetable_t old = p->pagetable;
+
+    tf->epc = elf.entry;
+    tf->sp = sp;
+    tf->a0 = argc;
+    tf->a1 = sp;
+
+    p->pagetable = pagetable;
+    p->sz = sz;
+    safestrcpy(p->name, path, sizeof(p->name));
+
+    proc_freepagetable(old, oldsz);
     free_kargv(kargv, argc);
-    return rc;
+    return 0;
+
+load_bad:
+    proc_freepagetable(pagetable, sz);
+load_bad_cleanup:
+    if (ip)
+    {
+        iunlockput(ip);
+        end_op();
+    }
+    free_kargv(kargv, argc);
+    return -1;
+
+bad:
+    iunlockput(ip);
+    end_op();
+    free_kargv(kargv, argc);
+    return -1;
 }
 
 int exec_program_for_proc(struct proc *p, const char *name, char *argv[], int argc)
 {
-    const struct user_program *prog = find_user_program(name);
-    if (prog == 0)
-        return -1;
-    return install_user_program(p, prog, argv, argc);
+    (void)p;
+    (void)name;
+    (void)argv;
+    (void)argc;
+
+    return -1;
 }
 
 int do_exec_static(const char *name, char *argv[], int argc)
 {
-    return exec_program_for_proc(myproc(), name, argv, argc);
+    (void)name;
+    (void)argv;
+    (void)argc;
+    return -1;
 }

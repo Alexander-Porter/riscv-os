@@ -71,6 +71,13 @@ extern uint64 sys_write(void);
 extern uint64 sys_read(void);
 extern uint64 sys_open(void);
 extern uint64 sys_close(void);
+extern uint64 sys_dup(void);
+extern uint64 sys_pipe(void);
+extern uint64 sys_fstat(void);
+extern uint64 sys_chdir(void);
+extern uint64 sys_mkdir(void);
+extern uint64 sys_unlink(void);
+extern uint64 sys_link(void);
 extern uint64 sys_yield(void);
 extern uint64 sys_setpriority(void);
 extern uint64 sys_getpriority(void);
@@ -109,6 +116,13 @@ static uint64 (*syscalls[])(void) = {
     [SYS_shm_create] = sys_shm_create,
     [SYS_shm_get] = sys_shm_get,
     [SYS_shm_unmap] = sys_shm_unmap,
+    [SYS_dup] = sys_dup,
+    [SYS_pipe] = sys_pipe,
+    [SYS_fstat] = sys_fstat,
+    [SYS_chdir] = sys_chdir,
+    [SYS_mkdir] = sys_mkdir,
+    [SYS_unlink] = sys_unlink,
+    [SYS_link] = sys_link,
 };
 
 void syscall(void)

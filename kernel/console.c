@@ -10,10 +10,15 @@
 //
 
 #include "types.h"
+#include "proc.h"
 #include "global_func.h"
 
+void console_init(void) {
+    uart_init();
+}
+
 // 输出单个字符到 UART
-void console_putc(char c) {
+void console_putc(int c) {
     uart_putc(c);
 }
 
@@ -25,4 +30,39 @@ void console_puts(const char *s) {
         }
         console_putc(*s++);
     }
+}
+
+// 将缓冲区写到控制台，返回写入的字节数
+int console_write(const char *buf, int n) {
+    for (int i = 0; i < n; i++) {
+        if (buf[i] == '\n') {
+            console_putc('\r');
+        }
+        console_putc(buf[i]);
+    }
+    return n;
+}
+
+// 从控制台读取数据，简单地逐字节阻塞等待
+int console_read(char *buf, int n) {
+    int i = 0;
+    while (i < n) {
+        int c = uart_getc();
+        if (c < 0) {
+            struct proc *p = myproc();
+            if (p && killed(p)) {
+                return -1;
+            }
+            if (p)
+                yield();
+            continue;
+        }
+        if (c == '\r')
+            c = '\n';
+        buf[i++] = (char)c;
+        if (c == '\n') {
+            break;
+        }
+    }
+    return i;
 }

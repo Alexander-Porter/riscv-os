@@ -19,9 +19,12 @@ SRC = \
 	kernel/printf.c \
 	kernel/kalloc.c \
 	kernel/spinlock.c \
+	kernel/sleeplock.c \
+	kernel/bio.c \
 	kernel/proc.c \
 	kernel/syscall.c \
 	kernel/sysproc.c \
+	kernel/sysfile.c \
 	kernel/vm.c \
 	kernel/string.c \
 	kernel/list.c \
@@ -29,6 +32,11 @@ SRC = \
 	kernel/user_programs.c \
 	kernel/semaphore.c \
 	kernel/shm.c \
+	kernel/file.c \
+	kernel/fs.c \
+	kernel/log.c \
+	kernel/pipe.c \
+	kernel/virtio_disk.c \
 	kernel/swtch.S \
 	kernel/trampoline.S \
 	kernel/trap/kernelvec.S \

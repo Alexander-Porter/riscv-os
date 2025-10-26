@@ -88,7 +88,7 @@ void destroy_pagetable(pagetable_t pt);
 uint64 walkaddr(pagetable_t pagetable, uint64 va);
 pagetable_t uvmcreate(void);
 void uvminit(pagetable_t pagetable, uchar *src, int sz);
-uint64 uvmalloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz);
+uint64 uvmalloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz, int perm);
 uint64 uvmdealloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz);
 void uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free);
 void uvmfree(pagetable_t pagetable, uint64 sz);

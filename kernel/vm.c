@@ -134,7 +134,7 @@ void uvminit(pagetable_t pagetable, uchar *src, int sz)
     panic("uvminit: mappages");
 }
 
-uint64 uvmalloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz)
+uint64 uvmalloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz, int perm)
 {
   if (newsz < oldsz)
     return oldsz;
@@ -149,7 +149,7 @@ uint64 uvmalloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz)
       return 0;
     }
     memset(mem, 0, PGSIZE);
-    if (mappages(pagetable, a, PGSIZE, (uint64)mem, PTE_R | PTE_W | PTE_U) != 0)
+  if (mappages(pagetable, a, PGSIZE, (uint64)mem, perm) != 0)
     {
       free_page(mem);
       uvmdealloc(pagetable, a, oldsz);

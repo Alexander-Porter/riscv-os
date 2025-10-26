@@ -11,6 +11,7 @@
 // 内核主函数
 void main()
 {
+    console_init();
     printf("Hello OS - Lab 5: Process Management\n");
 
     pmm_init();         // 初始化物理内存管理器

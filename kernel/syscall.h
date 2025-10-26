@@ -28,6 +28,13 @@
 #define SYS_shm_create 30
 #define SYS_shm_get 31
 #define SYS_shm_unmap 32
+#define SYS_dup     33
+#define SYS_pipe    34
+#define SYS_fstat   35
+#define SYS_chdir   36
+#define SYS_mkdir   37
+#define SYS_unlink  38
+#define SYS_link    39
 
 #ifndef __ASSEMBLER__
 void syscall(void);
