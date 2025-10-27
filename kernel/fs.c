@@ -77,13 +77,14 @@ struct inode *ialloc(uint dev, short type)
         {
             memset(dip, 0, sizeof(*dip));
             dip->type = type;
-            log_write(bp);
+            log_block_write(bp);
             brelse(bp);
             return iget(dev, inum);
         }
         brelse(bp);
     }
     panic("ialloc: no inodes");
+    return 0; // unreachable
 }
 
 struct inode *idup(struct inode *ip)
@@ -162,7 +163,7 @@ void iupdate(struct inode *ip)
     dip->nlink = ip->nlink;
     dip->size = ip->size;
     memmove(dip->addrs, ip->addrs, sizeof(ip->addrs));
-    log_write(bp);
+    log_block_write(bp);
     brelse(bp);
 }
 
@@ -177,11 +178,11 @@ static uint balloc(uint dev)
             if ((bp->data[bi / 8] & m) == 0)
             {
                 bp->data[bi / 8] |= m;
-                log_write(bp);
+                log_block_write(bp);
                 brelse(bp);
                 struct buf *bb = bread(dev, b + bi);
                 memset(bb->data, 0, BSIZE);
-                log_write(bb);
+                log_block_write(bb);
                 brelse(bb);
                 return b + bi;
             }
@@ -189,6 +190,7 @@ static uint balloc(uint dev)
         brelse(bp);
     }
     panic("balloc: out of blocks");
+    return 0; // unreachable
 }
 
 static void bfree(int dev, uint b)
@@ -199,7 +201,7 @@ static void bfree(int dev, uint b)
     if ((bp->data[bi / 8] & m) == 0)
         panic("freeing free block");
     bp->data[bi / 8] &= ~m;
-    log_write(bp);
+    log_block_write(bp);
     brelse(bp);
 }
 
@@ -222,13 +224,14 @@ static uint bmap(struct inode *ip, uint bn)
         if (a[bn] == 0)
         {
             a[bn] = balloc(ip->dev);
-            log_write(bp);
+            log_block_write(bp);
         }
         uint addr = a[bn];
         brelse(bp);
         return addr;
     }
     panic("bmap: out of range");
+    return 0; // unreachable
 }
 
 void itrunc(struct inode *ip)
@@ -304,7 +307,7 @@ int writei(struct inode *ip, int user_src, uint64 src, uint off, uint n)
             brelse(bp);
             break;
         }
-        log_write(bp);
+    log_block_write(bp);
         brelse(bp);
         tot += m;
         off += m;
@@ -329,12 +332,77 @@ void stati(struct inode *ip, struct stat *st)
     st->size = ip->size;
 }
 
+// ====================== 调试与统计辅助 ======================
+// 统计空闲块数量：扫描位图，统计为0的比特数
+int count_free_blocks(void)
+{
+    int free = 0;
+    for (uint b = 0; b < sb.size; b += BPB)
+    {
+        struct buf *bp = bread(ROOTDEV, BBLOCK(b, sb));
+        for (int bi = 0; bi < BPB && b + bi < sb.size; bi++)
+        {
+            int m = 1 << (bi % 8);
+            if ((bp->data[bi / 8] & m) == 0)
+                free++;
+        }
+        brelse(bp);
+    }
+    return free;
+}
+
+// 统计空闲inode数量：遍历所有inode磁盘块，type==0视为空闲
+int count_free_inodes(void)
+{
+    int free = 0;
+    for (uint inum = 1; inum < sb.ninodes; inum++)
+    {
+        struct buf *bp = bread(ROOTDEV, IBLOCK(inum, sb));
+        struct dinode *dip = (struct dinode *)bp->data + inum % IPB;
+        if (dip->type == 0)
+            free++;
+        brelse(bp);
+    }
+    return free;
+}
+
+extern int buffer_cache_hits, buffer_cache_misses, disk_read_count, disk_write_count;
+
+void debug_filesystem_state(void)
+{
+    printf("=== Filesystem Debug Info ===\n");
+    printf("Total blocks: %d\n", sb.size);
+    printf("Data blocks: %d\n", sb.nblocks);
+    printf("Inodes: %d\n", sb.ninodes);
+    printf("Log blocks: %d (start=%d)\n", sb.nlog, sb.logstart);
+    printf("Inode start: %d  Bmap start: %d\n", sb.inodestart, sb.bmapstart);
+    printf("Free blocks: %d\n", count_free_blocks());
+    printf("Free inodes: %d\n", count_free_inodes());
+    printf("Buf cache hits: %d  misses: %d\n", buffer_cache_hits, buffer_cache_misses);
+    printf("Disk reads: %d  writes: %d\n", disk_read_count, disk_write_count);
+}
+
+void debug_inode_usage(void)
+{
+    printf("=== Inode Usage ===\n");
+    acquire(&icache.lock);
+    for (int i = 0; i < NINODE; i++)
+    {
+        struct inode *ip = &icache.inode[i];
+        if (ip->ref > 0)
+        {
+            printf("Inode %d: ref=%d, type=%d, size=%d\n", ip->inum, ip->ref, ip->type, ip->size);
+        }
+    }
+    release(&icache.lock);
+}
+
 int namecmp(const char *s, const char *t)
 {
     return strncmp(s, t, DIRSIZ);
 }
 
-struct inode *dirlookup(struct inode *dp, char *name, uint *poff)
+struct inode *dir_lookup(struct inode *dp, char *name, uint *poff)
 {
     if (dp->type != T_DIR)
         panic("dirlookup not DIR");
@@ -357,12 +425,12 @@ struct inode *dirlookup(struct inode *dp, char *name, uint *poff)
     return 0;
 }
 
-int dirlink(struct inode *dp, char *name, uint inum)
+int dir_link(struct inode *dp, char *name, uint inum)
 {
     struct dirent de;
     uint off;
 
-    if ((dirlookup(dp, name, 0)) != 0)
+    if ((dir_lookup(dp, name, 0)) != 0)
         return -1;
 
     for (off = 0; off < dp->size; off += sizeof(de))
@@ -415,17 +483,17 @@ static struct inode *namex(char *path, int nameiparent, char *name)
     while ((path = skipelem(path, name)) != 0)
     {
         ilock(ip);
-        if (ip->type != T_DIR)
+    if (ip->type != T_DIR)
         {
             iunlockput(ip);
             return 0;
         }
-        if (nameiparent && *path == '\0')
+    if (nameiparent && *path == '\0')
         {
             iunlock(ip);
             return ip;
         }
-        struct inode *next = dirlookup(ip, name, 0);
+    struct inode *next = dir_lookup(ip, name, 0);
         if (next == 0)
         {
             iunlockput(ip);
@@ -442,13 +510,13 @@ static struct inode *namex(char *path, int nameiparent, char *name)
     return ip;
 }
 
-struct inode *namei(char *path)
+struct inode *path_walk(char *path)
 {
     char name[DIRSIZ];
     return namex(path, 0, name);
 }
 
-struct inode *nameiparent(char *path, char *name)
+struct inode *path_parent(char *path, char *name)
 {
     return namex(path, 1, name);
 }

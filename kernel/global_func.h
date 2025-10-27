@@ -54,6 +54,12 @@ void timer_interrupt(void);
 uint64 get_time(void);
 void set_next_timer(uint64 interval);
 
+// plic.c - 外部中断控制器
+void plic_init(void);
+void plic_init_hart(void);
+int plic_claim(void);
+void plic_complete(int irq);
+
 
 void run_all_tests(void);
 

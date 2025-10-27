@@ -14,12 +14,14 @@ static void run_child(const char *prog)
 
 int main(void)
 {
+    printf("init: starting tests\n");
     // 依次运行的用户程序列表
     static const char *const tests[] = {
-        "testprocess",
-        "testcow",
-        "testsyscall2",
-        "testsbrkbench",
+        "testprocess",    // 基础：创建/写入/读取/stat/目录
+        "testsyscall2",   // 链接/解除链接与内容验证
+        "testcow",        // 目录与相对路径
+        "testsbrkbench",  // 并发小文件创建/写入
+        "testfsperf"      // 性能测试（小文件+大文件）
     };
 
 

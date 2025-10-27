@@ -18,7 +18,8 @@
 #define ROOTDEV      1     // 根文件系统所在设备号
 #define MAXPATH      128   // 路径最大长度
 #define MAXOPBLOCKS  10    // 单次文件系统操作占用的最大日志块数
-#define LOGSIZE      (MAXOPBLOCKS * 3)
+#define LOGBLOCKS    (MAXOPBLOCKS * 3)
+#define LOGSIZE      LOGBLOCKS
 #define FSSIZE       200000  // 文件系统总块数（仅用于 mkfs）
 
 // 懒分配 sbrk

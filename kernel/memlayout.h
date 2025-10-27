@@ -16,8 +16,22 @@
 #define PGROUNDUP(sz)  (((sz)+PGSIZE-1) & ~(PGSIZE-1)) // 向上取整到页边界
 #define PGROUNDDOWN(a) (((a)) & ~(PGSIZE-1))   // 向下取整到页边界
 
-// QEMU中virt主机的UART设备地址
-#define UART0 0x10000000L
+// QEMU virt 平台外设 MMIO 地址
+#define UART0   0x10000000L
+#define UART0_IRQ 10
+#ifndef VIRTIO0
+#define VIRTIO0 0x10001000L
+#endif
+#define VIRTIO0_IRQ 1
+#define CLINT   0x02000000L
+#define CLINT_SIZE 0x000c0000L
+#define PLIC    0x0c000000L
+#define PLIC_SIZE 0x00400000L
+#define PLIC_PRIORITY (PLIC + 0x0)
+#define PLIC_PENDING  (PLIC + 0x1000)
+#define PLIC_SENABLE(hart)   (PLIC + 0x2080 + (hart) * 0x100)
+#define PLIC_SPRIORITY(hart) (PLIC + 0x201000 + (hart) * 0x2000)
+#define PLIC_SCLAIM(hart)    (PLIC + 0x201004 + (hart) * 0x2000)
 
 // trampoline 与内核栈布局，参考 xv6
 #define TRAMPOLINE (MAXVA - PGSIZE)

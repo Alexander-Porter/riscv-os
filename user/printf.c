@@ -42,72 +42,9 @@ static void printptr(int fd, uint64 x)
     }
 }
 
-void vprintf(const char *fmt, va_list ap)
+static void vformat(int fd, const char *fmt, va_list ap)
 {
-    const char *p;
-    for (p = fmt; *p; p++)
-    {
-        if (*p != '%')
-        {
-            putc(1, *p);
-            continue;
-        }
-        p++;
-        if (!*p)
-            break;
-        switch (*p)
-        {
-        case 'd':
-        case 'i':
-            printint(1, va_arg(ap, int), 10, 1);
-            break;
-        case 'u':
-            printint(1, va_arg(ap, unsigned int), 10, 0);
-            break;
-        case 'x':
-        case 'X':
-            printint(1, va_arg(ap, unsigned int), 16, 0);
-            break;
-        case 'p':
-            printptr(1, va_arg(ap, uint64));
-            break;
-        case 's':
-        {
-            const char *s = va_arg(ap, const char *);
-            if (s == 0)
-                s = "(null)";
-            while (*s)
-                putc(1, *s++);
-            break;
-        }
-        case 'c':
-            putc(1, (char)va_arg(ap, int));
-            break;
-        case '%':
-            putc(1, '%');
-            break;
-        default:
-            putc(1, '%');
-            putc(1, *p);
-            break;
-        }
-    }
-}
-
-void printf(const char *fmt, ...)
-{
-    va_list ap;
-    va_start(ap, fmt);
-    vprintf(fmt, ap);
-    va_end(ap);
-}
-
-void fprintf(int fd, const char *fmt, ...)
-{
-    va_list ap;
-    va_start(ap, fmt);
-    const char *p;
-    for (p = fmt; *p; p++)
+    for (const char *p = fmt; *p; p++)
     {
         if (*p != '%')
         {
@@ -117,18 +54,36 @@ void fprintf(int fd, const char *fmt, ...)
         p++;
         if (!*p)
             break;
+
+        int is_long = 0;
+        if (*p == 'l')
+        {
+            is_long = 1;
+            p++;
+            if (!*p) break;
+        }
+
         switch (*p)
         {
         case 'd':
         case 'i':
-            printint(fd, va_arg(ap, int), 10, 1);
+            if (is_long)
+                printint(fd, va_arg(ap, long), 10, 1);
+            else
+                printint(fd, va_arg(ap, int), 10, 1);
             break;
         case 'u':
-            printint(fd, va_arg(ap, unsigned int), 10, 0);
+            if (is_long)
+                printint(fd, (long)va_arg(ap, unsigned long), 10, 0);
+            else
+                printint(fd, (long)va_arg(ap, unsigned int), 10, 0);
             break;
         case 'x':
         case 'X':
-            printint(fd, va_arg(ap, unsigned int), 16, 0);
+            if (is_long)
+                printint(fd, (long)va_arg(ap, unsigned long), 16, 0);
+            else
+                printint(fd, (long)va_arg(ap, unsigned int), 16, 0);
             break;
         case 'p':
             printptr(fd, va_arg(ap, uint64));
@@ -149,10 +104,32 @@ void fprintf(int fd, const char *fmt, ...)
             putc(fd, '%');
             break;
         default:
+            // 未支持的格式，按原样输出
             putc(fd, '%');
+            if (is_long) putc(fd, 'l');
             putc(fd, *p);
             break;
         }
     }
+}
+
+void vprintf(const char *fmt, va_list ap)
+{
+    vformat(1, fmt, ap);
+}
+
+void printf(const char *fmt, ...)
+{
+    va_list ap;
+    va_start(ap, fmt);
+    vformat(1, fmt, ap);
+    va_end(ap);
+}
+
+void fprintf(int fd, const char *fmt, ...)
+{
+    va_list ap;
+    va_start(ap, fmt);
+    vformat(fd, fmt, ap);
     va_end(ap);
 }

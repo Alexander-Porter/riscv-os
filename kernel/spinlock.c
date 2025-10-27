@@ -15,7 +15,10 @@ void acquire(struct spinlock *lk)
 {
     push_off();
     if (holding(lk))
+    {
+    printf("acquire panic: lock=%s ra=%p\n", lk->name ? lk->name : "(null)", __builtin_return_address(0));
         panic("acquire");
+    }
 
     while (__sync_lock_test_and_set(&lk->locked, 1) != 0)
         ;

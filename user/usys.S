@@ -188,3 +188,15 @@ link:
 	ecall
 	ret
 
+	.globl debugfs
+debugfs:
+	li a7, SYS_debugfs
+	ecall
+	ret
+
+	.globl crash
+crash:
+	li a7, SYS_crash
+	ecall
+	ret
+

@@ -14,6 +14,12 @@ struct {
 
 static struct buf *bget(uint dev, uint blockno);
 
+// 统计信息：缓冲命中/未命中与磁盘I/O次数
+int buffer_cache_hits = 0;
+int buffer_cache_misses = 0;
+int disk_read_count = 0;
+int disk_write_count = 0;
+
 void binit(void)
 {
     initlock(&bcache.lock, "bcache");
@@ -42,6 +48,7 @@ static struct buf *bget(uint dev, uint blockno)
         if (b->dev == dev && b->blockno == blockno)
         {
             b->refcnt++;
+            buffer_cache_hits++;
             release(&bcache.lock);
             acquiresleep(&b->lock);
             return b;
@@ -56,6 +63,7 @@ static struct buf *bget(uint dev, uint blockno)
             b->blockno = blockno;
             b->valid = 0;
             b->refcnt = 1;
+            buffer_cache_misses++;
             release(&bcache.lock);
             acquiresleep(&b->lock);
             return b;
@@ -73,6 +81,7 @@ struct buf *bread(uint dev, uint blockno)
     {
         virtio_disk_rw(b, 0);
         b->valid = 1;
+        disk_read_count++;
     }
     return b;
 }
@@ -82,6 +91,7 @@ void bwrite(struct buf *b)
     if (!holdingsleep(&b->lock))
         panic("bwrite");
     virtio_disk_rw(b, 1);
+    disk_write_count++;
 }
 
 void brelse(struct buf *b)

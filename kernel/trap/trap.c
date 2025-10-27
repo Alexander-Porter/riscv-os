@@ -239,7 +239,10 @@ void kerneltrap(void)
     int which_dev = devintr();
     if (which_dev == 0)
     {
-        handle_exception(scause, sepc, r_stval());
+        // 与 xv6 一致：内核态异常一律视为致命错误，打印关键信息后 panic
+        printf("kerneltrap: unexpected scause=0x%lx sepc=0x%lx stval=0x%lx\n",
+               scause, sepc, r_stval());
+        panic("kerneltrap");
     }
     else if (which_dev == IRQ_TIMER)
     {
@@ -278,17 +281,12 @@ void handle_interrupt_chain(int irq)
     // 获取当前IRQ线的优先级
     int irq_priority = (irq < MAX_IRQ_NUM) ? irq_priorities[irq] : IRQ_PRIORITY_LOW;
 
-    // 检查是否允许嵌套中断（只有更高优先级的IRQ才能嵌套）
-    if (irq_priority >= current_priority)
-    {
-        // 优先级不够高，不允许嵌套，直接返回
-        printf("IRQ %d blocked (priority %d >= current %d)\n", irq, irq_priority, current_priority);
-        return;
-    }
-
-    // 保存当前优先级
+    // 放宽优先级门控：始终处理当前中断（避免遗漏顶层外部中断）
+    // 仅在已有更高优先级处理中时才阻止低优先级嵌套
     int old_priority = current_priority;
-    current_priority = irq_priority;
+    if (irq_priority < current_priority) {
+        current_priority = irq_priority;
+    }
 
 
 
@@ -308,7 +306,6 @@ void handle_interrupt_chain(int irq)
     }
 
     // 恢复中断状态和优先级
-    //intr_off();
     enable_interrupt(irq); // 重新启用当前IRQ线
     current_priority = old_priority;
 }
@@ -330,6 +327,7 @@ int devintr(void)
 
     // 提取中断号
     int irq = SCAUSE_TO_IRQ(scause);
+    int hw_irq = 0;
 
     // 根据中断类型进行特殊处理
     switch (irq)
@@ -337,6 +335,9 @@ int devintr(void)
     case IRQ_TIMER:
         break;
     case IRQ_EXTERNAL:
+        hw_irq = plic_claim();
+        if (hw_irq == 0)
+            return 0;
         break;
     case IRQ_SOFTWARE:
         // 清除软件中断标志
@@ -348,6 +349,10 @@ int devintr(void)
     }
 
     handle_interrupt_chain(irq);
+
+    if (irq == IRQ_EXTERNAL)
+        plic_complete(hw_irq);
+
     return irq;
 }
 

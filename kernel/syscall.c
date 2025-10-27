@@ -90,6 +90,8 @@ extern uint64 sys_uptime(void);
 extern uint64 sys_shm_create(void);
 extern uint64 sys_shm_get(void);
 extern uint64 sys_shm_unmap(void);
+extern uint64 sys_debugfs(void);
+extern uint64 sys_crash(void);
 
 static uint64 (*syscalls[])(void) = {
     [SYS_exit] = sys_exit,
@@ -123,6 +125,8 @@ static uint64 (*syscalls[])(void) = {
     [SYS_mkdir] = sys_mkdir,
     [SYS_unlink] = sys_unlink,
     [SYS_link] = sys_link,
+    [SYS_debugfs] = sys_debugfs,
+    [SYS_crash] = sys_crash,
 };
 
 void syscall(void)

@@ -107,12 +107,12 @@ static struct inode *create(char *path, short type, short major, short minor)
     struct inode *dp;
     char name[DIRSIZ];
 
-    if ((dp = nameiparent(path, name)) == 0)
+    if ((dp = path_parent(path, name)) == 0)
         return 0;
 
     ilock(dp);
 
-    if ((ip = dirlookup(dp, name, 0)) != 0)
+    if ((ip = dir_lookup(dp, name, 0)) != 0)
     {
         iunlockput(dp);
         ilock(ip);
@@ -136,11 +136,11 @@ static struct inode *create(char *path, short type, short major, short minor)
         dp->nlink++;
         iupdate(dp);
 
-        if (dirlink(ip, ".", ip->inum) < 0 || dirlink(ip, "..", dp->inum) < 0)
+    if (dir_link(ip, ".", ip->inum) < 0 || dir_link(ip, "..", dp->inum) < 0)
             panic("create dots");
     }
 
-    if (dirlink(dp, name, ip->inum) < 0)
+    if (dir_link(dp, name, ip->inum) < 0)
         panic("create: dirlink");
 
     iunlockput(dp);
@@ -154,30 +154,35 @@ uint64 sys_open(void)
     if (argstr(0, path, sizeof(path)) < 0 || argint(1, &omode) < 0)
         return -1;
 
-    begin_op();
+    // 可选调试：跟踪 open 调用路径（默认关闭）
+    // printf("sys_open: path=%s omode=0x%x\n", path, omode);
+
+    begin_transaction();
 
     struct inode *ip;
     if (omode & O_CREATE)
     {
+    // printf("sys_open: create %s\n", path);
         ip = create(path, T_FILE, 0, 0);
         if (ip == 0)
         {
-            end_op();
+            // printf("sys_open: create failed for %s\n", path);
+            end_transaction();
             return -1;
         }
     }
     else
     {
-        if ((ip = namei(path)) == 0)
+    if ((ip = path_walk(path)) == 0)
         {
-            end_op();
+            end_transaction();
             return -1;
         }
         ilock(ip);
         if (ip->type == T_DIR && omode != O_RDONLY)
         {
             iunlockput(ip);
-            end_op();
+            end_transaction();
             return -1;
         }
     }
@@ -185,15 +190,16 @@ uint64 sys_open(void)
     if ((ip->type == T_DEVICE) && (ip->major < 0 || ip->major >= NDEV))
     {
         iunlockput(ip);
-        end_op();
-        return -1;
+    end_transaction();
+    printf("sys_open: filealloc failed for %s\n", path);
+    return -1;
     }
 
     struct file *f = filealloc();
     if (f == 0)
     {
         iunlockput(ip);
-        end_op();
+    end_transaction();
         return -1;
     }
 
@@ -202,7 +208,8 @@ uint64 sys_open(void)
     {
         fileclose(f);
         iunlockput(ip);
-        end_op();
+    end_transaction();
+    // printf("sys_open: fdalloc failed for %s\n", path);
         return -1;
     }
 
@@ -218,7 +225,8 @@ uint64 sys_open(void)
         itrunc(ip);
 
     iunlock(ip);
-    end_op();
+    end_transaction();
+    // printf("sys_open: ok fd=%d %s\n", fd, path);
     return fd;
 }
 
@@ -227,15 +235,15 @@ uint64 sys_mkdir(void)
     char path[MAXPATH];
     if (argstr(0, path, sizeof(path)) < 0)
         return -1;
-    begin_op();
+    begin_transaction();
     struct inode *ip = create(path, T_DIR, 0, 0);
     if (ip == 0)
     {
-        end_op();
+        end_transaction();
         return -1;
     }
     iunlockput(ip);
-    end_op();
+    end_transaction();
     return 0;
 }
 
@@ -246,24 +254,24 @@ uint64 sys_chdir(void)
     if (argstr(0, path, sizeof(path)) < 0)
         return -1;
 
-    begin_op();
-    struct inode *ip = namei(path);
+    begin_transaction();
+    struct inode *ip = path_walk(path);
     if (ip == 0)
     {
-        end_op();
+        end_transaction();
         return -1;
     }
     ilock(ip);
     if (ip->type != T_DIR)
     {
         iunlockput(ip);
-        end_op();
+        end_transaction();
         return -1;
     }
     iunlock(ip);
     iput(p->cwd);
     p->cwd = ip;
-    end_op();
+    end_transaction();
     return 0;
 }
 
@@ -273,18 +281,18 @@ uint64 sys_link(void)
     if (argstr(0, old, sizeof(old)) < 0 || argstr(1, new, sizeof(new)) < 0)
         return -1;
 
-    begin_op();
-    struct inode *ip = namei(old);
+    begin_transaction();
+    struct inode *ip = path_walk(old);
     if (ip == 0)
     {
-        end_op();
+    end_transaction();
         return -1;
     }
     ilock(ip);
     if (ip->type == T_DIR)
     {
         iunlockput(ip);
-        end_op();
+    end_transaction();
         return -1;
     }
     ip->nlink++;
@@ -292,18 +300,18 @@ uint64 sys_link(void)
     iunlock(ip);
 
     char name[DIRSIZ];
-    struct inode *dp = nameiparent(new, name);
+    struct inode *dp = path_parent(new, name);
     if (dp == 0)
         goto bad;
     ilock(dp);
-    if (dp->dev != ip->dev || dirlink(dp, name, ip->inum) < 0)
+    if (dp->dev != ip->dev || dir_link(dp, name, ip->inum) < 0)
     {
         iunlockput(dp);
         goto bad;
     }
     iunlockput(dp);
     iput(ip);
-    end_op();
+    end_transaction();
     return 0;
 
 bad:
@@ -311,7 +319,7 @@ bad:
     ip->nlink--;
     iupdate(ip);
     iunlockput(ip);
-    end_op();
+    end_transaction();
     return -1;
 }
 
@@ -334,12 +342,12 @@ uint64 sys_unlink(void)
     if (argstr(0, path, sizeof(path)) < 0)
         return -1;
 
-    begin_op();
+    begin_transaction();
     char name[DIRSIZ];
-    struct inode *dp = nameiparent(path, name);
+    struct inode *dp = path_parent(path, name);
     if (dp == 0)
     {
-        end_op();
+    end_transaction();
         return -1;
     }
 
@@ -347,16 +355,16 @@ uint64 sys_unlink(void)
     if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0)
     {
         iunlockput(dp);
-        end_op();
+    end_transaction();
         return -1;
     }
 
     uint off;
-    struct inode *ip = dirlookup(dp, name, &off);
+    struct inode *ip = dir_lookup(dp, name, &off);
     if (ip == 0)
     {
         iunlockput(dp);
-        end_op();
+    end_transaction();
         return -1;
     }
     ilock(ip);
@@ -366,7 +374,7 @@ uint64 sys_unlink(void)
     {
         iunlockput(ip);
         iunlockput(dp);
-        end_op();
+    end_transaction();
         return -1;
     }
 
@@ -385,7 +393,7 @@ uint64 sys_unlink(void)
     ip->nlink--;
     iupdate(ip);
     iunlockput(ip);
-    end_op();
+    end_transaction();
     return 0;
 }
 

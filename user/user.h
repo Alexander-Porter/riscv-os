@@ -3,6 +3,8 @@
 
 #include "../kernel/types.h"
 #include <stdarg.h>
+#include "../kernel/fcntl.h"
+#include "../kernel/stat.h"
 
 #define SBRK_ERROR ((char *)-1)
 
@@ -17,6 +19,13 @@ int wait(int *status);
 int exec(const char *path, char *const argv[]);
 int write(int fd, const void *buf, int n);
 int read(int fd, void *buf, int n);
+int open(const char *path, int omode);
+int close(int fd);
+int fstat(int fd, struct stat *st);
+int mkdir(const char *path);
+int chdir(const char *path);
+int link(const char *old, const char *newp);
+int unlink(const char *path);
 int getpid(void);
 int sleep(int ticks);
 int yield(void);
@@ -32,6 +41,8 @@ int sem_post(int semid);
 int shm_create(void);
 void *shm_get(int shmid);
 int shm_unmap(void *addr);
+int debugfs(int action);
+int crash(void);
 
 // 基础库函数
 void *memset(void *dst, int c, size_t n);

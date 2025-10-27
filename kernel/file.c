@@ -83,9 +83,9 @@ void fileclose(struct file *f)
     }
     else if (ff.type == FD_INODE)
     {
-        begin_op();
+    begin_transaction();
         iput(ff.ip);
-        end_op();
+    end_transaction();
     }
 }
 
@@ -194,13 +194,13 @@ int filewrite(struct file *f, uint64 addr, int n)
             if (n1 > max)
                 n1 = max;
 
-            begin_op();
+            begin_transaction();
             ilock(f->ip);
             int r = writei(f->ip, 1, addr + i, f->off, n1);
             if (r > 0)
                 f->off += r;
             iunlock(f->ip);
-            end_op();
+            end_transaction();
 
             if (r < 0)
                 break;

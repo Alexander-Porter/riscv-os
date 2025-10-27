@@ -11,7 +11,8 @@ struct logheader {
     int block[LOGSIZE];
 };
 
-struct log {
+// 手册命名：日志系统状态
+struct log_state {
     struct spinlock lock;
     int start;
     int size;
@@ -19,37 +20,48 @@ struct log {
     int committing;  // 是否正在提交
     int dev;
     struct logheader lh;
-} log;
+} logstate;
+
+// 调试开关：在提交时写完日志头后立刻崩溃，用于模拟“日志已持久化但数据未安装”的电源故障
+static volatile int force_crash_after_header = 0;
+
+void log_set_crash_mode(int enable)
+{
+    force_crash_after_header = enable ? 1 : 0;
+}
 
 static void read_head(void)
 {
-    struct buf *buf = bread(log.dev, log.start);
+    struct buf *buf = bread(logstate.dev, logstate.start);
     struct logheader *lh = (struct logheader *)(buf->data);
-    log.lh.n = lh->n;
-    for (int i = 0; i < log.lh.n; i++)
-        log.lh.block[i] = lh->block[i];
+    logstate.lh.n = lh->n;
+    for (int i = 0; i < logstate.lh.n; i++)
+        logstate.lh.block[i] = lh->block[i];
     brelse(buf);
 }
 
 static void write_head(void)
 {
-    struct buf *buf = bread(log.dev, log.start);
+    struct buf *buf = bread(logstate.dev, logstate.start);
     struct logheader *hb = (struct logheader *)(buf->data);
-    hb->n = log.lh.n;
-    for (int i = 0; i < log.lh.n; i++)
-        hb->block[i] = log.lh.block[i];
+    hb->n = logstate.lh.n;
+    for (int i = 0; i < logstate.lh.n; i++)
+        hb->block[i] = logstate.lh.block[i];
     bwrite(buf);
     brelse(buf);
 }
 
-static void install_trans(void)
+static void install_trans(int recovering)
 {
-    for (int i = 0; i < log.lh.n; i++)
+    for (int i = 0; i < logstate.lh.n; i++)
     {
-        struct buf *lbuf = bread(log.dev, log.start + i + 1);
-        struct buf *dbuf = bread(log.dev, log.lh.block[i]);
+        struct buf *lbuf = bread(logstate.dev, logstate.start + i + 1);
+        struct buf *dbuf = bread(logstate.dev, logstate.lh.block[i]);
         memmove(dbuf->data, lbuf->data, BSIZE);
         bwrite(dbuf);
+        // 在正常提交路径中，解除对目标块的 pin，以避免耗尽缓冲区
+        if (!recovering)
+            bunpin(dbuf);
         brelse(lbuf);
         brelse(dbuf);
     }
@@ -57,10 +69,10 @@ static void install_trans(void)
 
 static void write_log(void)
 {
-    for (int tail = 0; tail < log.lh.n; tail++)
+    for (int tail = 0; tail < logstate.lh.n; tail++)
     {
-        struct buf *to = bread(log.dev, log.start + tail + 1);
-        struct buf *from = bread(log.dev, log.lh.block[tail]);
+        struct buf *to = bread(logstate.dev, logstate.start + tail + 1);
+        struct buf *from = bread(logstate.dev, logstate.lh.block[tail]);
         memmove(to->data, from->data, BSIZE);
         bwrite(to);
         brelse(from);
@@ -68,105 +80,116 @@ static void write_log(void)
     }
 }
 
-void initlog(int dev, struct superblock *sb)
+void log_init(int dev, struct superblock *sb)
 {
     if (sizeof(struct logheader) >= BSIZE)
         panic("initlog: header too big");
 
-    initlock(&log.lock, "log");
-    log.start = sb->logstart;
-    log.size = sb->nlog;
-    log.dev = dev;
+    initlock(&logstate.lock, "log");
+    logstate.start = sb->logstart;
+    logstate.size = sb->nlog;
+    logstate.dev = dev;
     read_head();
-    recover_from_log();
+    recover_log();
 }
 
-void begin_op(void)
+void begin_transaction(void)
 {
-    acquire(&log.lock);
+    acquire(&logstate.lock);
     while (1)
     {
-        if (log.committing)
+        if (logstate.committing)
         {
-            sleep(&log, &log.lock);
+            sleep(&logstate, &logstate.lock);
         }
-        else if (log.lh.n + (log.outstanding + 1) * MAXOPBLOCKS > LOGSIZE)
+        else if (logstate.lh.n + (logstate.outstanding + 1) * MAXOPBLOCKS > LOGSIZE)
         {
-            sleep(&log, &log.lock);
+            sleep(&logstate, &logstate.lock);
         }
         else
         {
-            log.outstanding++;
-            release(&log.lock);
+            logstate.outstanding++;
+            release(&logstate.lock);
             break;
         }
     }
 }
 
-void end_op(void)
+void end_transaction(void)
 {
     int do_commit = 0;
 
-    acquire(&log.lock);
-    log.outstanding--;
-    if (log.committing)
+    acquire(&logstate.lock);
+    logstate.outstanding--;
+    if (logstate.committing)
         panic("log.committing");
-    if (log.outstanding == 0)
+    if (logstate.outstanding == 0)
     {
         do_commit = 1;
-        log.committing = 1;
+        logstate.committing = 1;
     }
     else
     {
-        wakeup(&log);
+        wakeup(&logstate);
     }
-    release(&log.lock);
+    release(&logstate.lock);
 
     if (!do_commit)
         return;
 
-    if (log.lh.n > 0)
+    if (logstate.lh.n > 0)
     {
-        write_log();
-        write_head();
-        install_trans();
-        log.lh.n = 0;
-        write_head();
+        write_log();              // 1) 将数据块写入日志区域
+        write_head();             // 2) 写入日志头(真正的提交点)
+        if (force_crash_after_header) {
+            printf("log: commit header written, n=%d firstblk=%d\n", logstate.lh.n,
+                   logstate.lh.n > 0 ? logstate.lh.block[0] : -1);
+            panic("log: forced crash after header"); // 3) 模拟掉电：日志存在但未安装
+        }
+        install_trans(0);        // 4) 安装到 home 位置
+        logstate.lh.n = 0;
+        write_head();            // 5) 清空日志
     }
 
-    acquire(&log.lock);
-    log.committing = 0;
-    wakeup(&log);
-    release(&log.lock);
+    acquire(&logstate.lock);
+    logstate.committing = 0;
+    wakeup(&logstate);
+    release(&logstate.lock);
 }
 
-void recover_from_log(void)
+void recover_log(void)
 {
     read_head();
-    install_trans();
-    log.lh.n = 0;
+    if (logstate.lh.n > 0) {
+        printf("recover: found n=%d firstblk=%d\n", logstate.lh.n,
+               logstate.lh.block[0]);
+    }
+    install_trans(1);
+    logstate.lh.n = 0;
     write_head();
+    if (logstate.lh.n == 0)
+        printf("recover: done\n");
 }
 
-void log_write(struct buf *b)
+void log_block_write(struct buf *b)
 {
-    if (log.lh.n >= LOGSIZE || log.lh.n >= log.size - 1)
+    if (logstate.lh.n >= LOGSIZE || logstate.lh.n >= logstate.size - 1)
         panic("too big a transaction");
-    if (log.outstanding < 1)
+    if (logstate.outstanding < 1)
         panic("log_write outside of trans");
 
-    acquire(&log.lock);
-    for (int i = 0; i < log.lh.n; i++)
+    acquire(&logstate.lock);
+    for (int i = 0; i < logstate.lh.n; i++)
     {
-        if (log.lh.block[i] == b->blockno)
+        if (logstate.lh.block[i] == b->blockno)
         {
-            log.lh.block[i] = b->blockno;
-            release(&log.lock);
+            logstate.lh.block[i] = b->blockno;
+            release(&logstate.lock);
             return;
         }
     }
-    log.lh.block[log.lh.n] = b->blockno;
-    log.lh.n++;
+    logstate.lh.block[logstate.lh.n] = b->blockno;
+    logstate.lh.n++;
     bpin(b);
-    release(&log.lock);
+    release(&logstate.lock);
 }

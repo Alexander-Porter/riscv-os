@@ -1,49 +1,57 @@
+// 替换为并发文件创建/写入/校验用例：两个子进程各写一个小文件
 #include "user.h"
 
-#define PAGE 4096
-// 选择较保守的页数，确保在10s超时内完成并留出其他测试开销
-#define N_PAGES 2560
-
-static inline uint64 tstart(void) { return rdtime(); }
-static inline uint64 tend(void) { return rdtime(); }
-
-// 基准A：逐页 sbrk，但不触碰内存（只测量系统调用与元数据开销）
-static uint64 bench_sbrk_only(int pages)
+static int write_text(const char *path, const char *s)
 {
-    uint64 t0 = tstart();
-    for (int i = 0; i < pages; i++) {
-        if (sbrk(PAGE) == SBRK_ERROR) return 0; // 0 表示失败
-    }
-    return tend() - t0;
+    int fd = open(path, O_CREATE | O_RDWR);
+    if (fd < 0) return -1;
+    int n = (int)strlen(s);
+    int m = write(fd, s, n);
+    close(fd);
+    return m == n ? 0 : -1;
 }
 
-// 基准B：逐页 sbrk 后立刻触碰该页（模拟“分配立即使用”，触发每页缺页/分配）
-static uint64 bench_interleaved_sbrk_touch(int pages)
+static int file_size(const char *path)
 {
-    uint64 t0 = tstart();
-    for (int i = 0; i < pages; i++) {
-        char *p = sbrk(PAGE);
-        if (p == SBRK_ERROR) return 0;
-        p[0] = (char)i;
-        p[PAGE/2] = (char)(i ^ 0x33);
-    }
-    return tend() - t0;
+    int fd = open(path, O_RDONLY);
+    if (fd < 0) return -1;
+    struct stat st;
+    if (fstat(fd, &st) < 0) { close(fd); return -1; }
+    close(fd);
+    return (int)st.size;
 }
 
 int main(void)
 {
-    printf("testsbrkbench: BEGIN (pages=%d)\n", N_PAGES);
+    const char *f0 = "c0";
+    const char *f1 = "c1";
 
-    // 基准A：连续 sbrk（不触碰）
-    uint64 cA = bench_sbrk_only(N_PAGES);
-    if (!cA) { printf("testsbrkbench: bench_sbrk_only failed\n"); exit(-1); }
-    printf("A) sbrk-only (pages=%d): %x cycles\n", N_PAGES, (unsigned)cA);
+    int pid = fork();
+    if (pid < 0) { printf("concfs: fork failed\n"); exit(-1); }
+    if (pid == 0)
+    {
+        if (write_text(f0, "child0") < 0) exit(-1);
+        exit(0);
+    }
 
-    // 基准B：sbrk 后立即触碰（每页）
-    uint64 cB = bench_interleaved_sbrk_touch(N_PAGES);
-    if (!cB) { printf("testsbrkbench: bench_interleaved_sbrk_touch failed\n"); exit(-1); }
-    printf("B) sbrk+touch (pages=%d): %x cycles\n", N_PAGES, (unsigned)cB);
+    int pid2 = fork();
+    if (pid2 < 0) { printf("concfs: fork2 failed\n"); exit(-1); }
+    if (pid2 == 0)
+    {
+        if (write_text(f1, "child1") < 0) exit(-1);
+        exit(0);
+    }
 
-    printf("testsbrkbench: END\n");
+    int st;
+    wait(&st);
+    wait(&st);
+
+    int s0 = file_size(f0);
+    int s1 = file_size(f1);
+    if (s0 <= 0 || s1 <= 0) { printf("concfs: size check failed s0=%d s1=%d\n", s0, s1); exit(-1); }
+
+    unlink(f0);
+    unlink(f1);
+    printf("testfs_concurrent: PASS\n");
     exit(0);
 }

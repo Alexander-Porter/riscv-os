@@ -2,9 +2,7 @@
 #define __VIRTIO_H
 
 #include "types.h"
-
-// virtio mmio 地址
-#define VIRTIO0 0x10001000
+#include "memlayout.h"
 
 // virtio 寄存器偏移
 #define VIRTIO_MMIO_MAGIC_VALUE   0x000

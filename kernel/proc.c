@@ -30,7 +30,7 @@ static int allocpid(void);
 static int timeslice_for_priority(int priority);
 static void promote_waiting_process(struct proc *p);
 
-#define PROC_DEBUG_INTERVAL 5
+#define PROC_DEBUG_INTERVAL 0  // 设为0默认关闭创建计数触发的调试打印，避免在敏感时机打断
 
 static int proc_created_total = 0;
 
@@ -84,10 +84,11 @@ static void debug_proc_table(void)
 static void proc_note_creation(void)
 {
     proc_created_total++;
-    if (proc_created_total % PROC_DEBUG_INTERVAL == 0)
-    {
+    // 可选：按创建计数周期性打印进程表（默认关闭以降低时序干扰）
+#if PROC_DEBUG_INTERVAL > 0
+    if (PROC_DEBUG_INTERVAL > 0 && (proc_created_total % PROC_DEBUG_INTERVAL) == 0)
         debug_proc_table();
-    }
+#endif
 }
 
 struct cpu cpus[NCPU];
@@ -326,16 +327,17 @@ void userinit(void)
         panic("userinit: allocproc");
 
     initproc = p;
+    release(&p->lock); // 释放进程锁，让磁盘中断可以在初始化期间完成
+
     char *argv[] = {"init", 0};
     if (exec_program_for_proc(p, "init", argv, 1) < 0)
         panic("userinit: exec init failed");
 
-    begin_op();
-    struct inode *cwd = namei("/");
+    begin_transaction();
+    struct inode *cwd = path_walk("/");
     if (cwd == 0)
         panic("userinit: no root");
-    p->cwd = cwd;
-    end_op();
+    end_transaction();
 
     struct file *f0 = filealloc();
     struct file *f1 = filealloc();
@@ -352,6 +354,8 @@ void userinit(void)
     f1->writable = 1;
     f1->major = CONSOLE;
 
+    acquire(&p->lock);
+    p->cwd = cwd;
     p->ofile[0] = f0;
     p->ofile[1] = f1;
     p->ofile[2] = filedup(f1);
@@ -453,13 +457,13 @@ void exit(int status)
         }
     }
 
-    begin_op();
+    begin_transaction();
     if (p->cwd)
     {
         iput(p->cwd);
         p->cwd = 0;
     }
-    end_op();
+    end_transaction();
 
     shm_cleanup_process(p);
 

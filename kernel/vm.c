@@ -91,6 +91,9 @@ void kvm_init(void)
   memset(kernel_pagetable, 0, PGSIZE);
 
   kvmmap(kernel_pagetable, UART0, UART0, PGSIZE, PTE_R | PTE_W);
+  kvmmap(kernel_pagetable, VIRTIO0, VIRTIO0, PGSIZE, PTE_R | PTE_W);
+  kvmmap(kernel_pagetable, PLIC, PLIC, PLIC_SIZE, PTE_R | PTE_W);
+  kvmmap(kernel_pagetable, CLINT, CLINT, CLINT_SIZE, PTE_R | PTE_W);
 
   uint64 code_sz = PGROUNDUP((uint64)etext - KERNBASE);
   kvmmap(kernel_pagetable, KERNBASE, KERNBASE, code_sz, PTE_R | PTE_X);

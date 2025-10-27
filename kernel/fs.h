@@ -53,6 +53,8 @@ struct dirent {
     char name[DIRSIZ];
 };
 
+extern struct superblock sb;
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -65,20 +67,27 @@ void ilock(struct inode *ip);
 void iunlock(struct inode *ip);
 void iunlockput(struct inode *ip);
 void iput(struct inode *ip);
+void iupdate(struct inode *ip);
 void itrunc(struct inode *ip);
 void stati(struct inode *ip, struct stat *st);
 int readi(struct inode *ip, int user_dst, uint64 dst, uint off, uint n);
 int writei(struct inode *ip, int user_src, uint64 src, uint off, uint n);
-struct inode *dirlookup(struct inode *dp, char *name, uint *poff);
-int dirlink(struct inode *dp, char *name, uint inum);
-struct inode *namei(char *path);
-struct inode *nameiparent(char *path, char *name);
+struct inode *dir_lookup(struct inode *dp, char *name, uint *poff);
+int dir_link(struct inode *dp, char *name, uint inum);
+struct inode *path_walk(char *path);
+struct inode *path_parent(char *path, char *name);
 
-void begin_op(void);
-void end_op(void);
-void log_write(struct buf *b);
-void recover_from_log(void);
-void initlog(int dev, struct superblock *sb);
+void begin_transaction(void);
+void end_transaction(void);
+void log_block_write(struct buf *b);
+void recover_log(void);
+void log_init(int dev, struct superblock *sb);
+// 调试：控制提交时的强制崩溃，用于模拟日志-数据未安装的场景
+void log_set_crash_mode(int enable);
+
+// 调试辅助接口（由 fs.c 提供）
+void debug_filesystem_state(void);
+void debug_inode_usage(void);
 
 #ifdef __cplusplus
 }

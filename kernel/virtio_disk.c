@@ -7,6 +7,7 @@
 #include "virtio.h"
 #include "param.h"
 #include "global_func.h"
+#include "include/trap.h"
 
 #define R(r) ((volatile uint32 *)(VIRTIO0 + (r)))
 
@@ -90,7 +91,12 @@ void virtio_disk_init(void)
 
     uint32 status = 0;
 
-    if (*R(VIRTIO_MMIO_MAGIC_VALUE) != 0x74726976 || *R(VIRTIO_MMIO_VERSION) != 2 || *R(VIRTIO_MMIO_DEVICE_ID) != 2 || *R(VIRTIO_MMIO_VENDOR_ID) != 0x554d4551)
+    uint32 magic = *R(VIRTIO_MMIO_MAGIC_VALUE);
+    uint32 version = *R(VIRTIO_MMIO_VERSION);
+    uint32 device_id = *R(VIRTIO_MMIO_DEVICE_ID);
+    uint32 vendor_id = *R(VIRTIO_MMIO_VENDOR_ID);
+    printf("virtio probe: magic=0x%x version=%u device=%u vendor=0x%x\n", magic, version, device_id, vendor_id);
+    if (magic != 0x74726976 || version != 2 || device_id != 2 || vendor_id != 0x554d4551)
         panic("virtio disk not found");
 
     *R(VIRTIO_MMIO_STATUS) = status;
@@ -150,6 +156,10 @@ void virtio_disk_init(void)
 
     status |= VIRTIO_CONFIG_S_DRIVER_OK;
     *R(VIRTIO_MMIO_STATUS) = status;
+
+    // 将 virtio 磁盘中断挂入中断链
+    if (register_interrupt(IRQ_EXTERNAL, virtio_disk_intr, "virtio_disk") != 0)
+        panic("virtio_disk: register interrupt");
 }
 
 void virtio_disk_rw(struct buf *b, int write)
@@ -195,7 +205,20 @@ void virtio_disk_rw(struct buf *b, int write)
     *R(VIRTIO_MMIO_QUEUE_NOTIFY) = 0;
 
     while (b->disk == 1)
+    {
+        struct proc *p = myproc();
+        if (p == 0)
+        {
+            release(&disk.vdisk_lock);
+            while (b->disk == 1)
+            {
+                __sync_synchronize(); // 等待磁盘中断完成
+            }
+            acquire(&disk.vdisk_lock);
+            continue;
+        }
         sleep(b, &disk.vdisk_lock);
+    }
 
     disk.info[idx[0]].b = 0;
     free_chain(idx[0]);

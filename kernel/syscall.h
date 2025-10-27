@@ -35,6 +35,8 @@
 #define SYS_mkdir   37
 #define SYS_unlink  38
 #define SYS_link    39
+#define SYS_debugfs 40
+#define SYS_crash   41
 
 #ifndef __ASSEMBLER__
 void syscall(void);

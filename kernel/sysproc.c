@@ -7,6 +7,7 @@
 #include "exec.h"
 #include "semaphore.h"
 #include "shm.h"
+#include "fs.h"
 
 extern volatile uint64 ticks;
 
@@ -118,6 +119,44 @@ uint64 sys_rdtime(void)
 uint64 sys_uptime(void)
 {
     return ticks;
+}
+
+// 调试：打印文件系统状态/inode使用/I-O统计
+uint64 sys_debugfs(void)
+{
+    int action;
+    if (argint(0, &action) < 0)
+        return (uint64)-1;
+    switch (action)
+    {
+    case 0:
+        debug_filesystem_state();
+        break;
+    case 1:
+        debug_inode_usage();
+        break;
+    case 2:
+        // 组合输出
+        debug_filesystem_state();
+        debug_inode_usage();
+        break;
+    case 10: // 启用提交时强制崩溃（写完日志头后）
+        log_set_crash_mode(1);
+        break;
+    case 11: // 关闭提交时强制崩溃
+        log_set_crash_mode(0);
+        break;
+    default:
+        return (uint64)-1;
+    }
+    return 0;
+}
+
+// 人工触发崩溃：用于崩溃恢复测试
+uint64 sys_crash(void)
+{
+    panic("user_crash");
+    return 0; // unreachable
 }
 
 uint64 sys_sem_create(void)

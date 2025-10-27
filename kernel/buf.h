@@ -17,6 +17,7 @@ struct buf {
     uchar data[BSIZE];     // 实际数据缓冲区
 };
 
+
 void binit(void);
 struct buf *bread(uint dev, uint blockno);
 void bwrite(struct buf *b);

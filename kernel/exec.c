@@ -8,6 +8,113 @@
 #include "file.h"
 #include "elf.h"
 #include "shm.h"
+#include "exec.h"
+#include "user_programs.h"
+
+// 从路径中提取末尾的程序名，忽略多余的斜杠
+static const char *path_basename(const char *path)
+{
+    if (path == 0)
+        return 0;
+    while (*path == '/')
+        path++;
+    const char *last = path;
+    for (const char *p = path; *p; p++)
+        if (*p == '/')
+            last = p + 1;
+    return last;
+}
+
+// 从内置的用户程序镜像加载并运行程序
+static int exec_from_binary(struct proc *p, const char *progname, const uchar *image, uint64 image_sz, uint64 entry, char *argv[], int argc)
+{
+    if (p == 0 || image == 0 || image_sz == 0)
+        return -1;
+    if (argc < 0 || argc > MAXARG)
+        return -1;
+
+    shm_cleanup_process(p);
+
+    pagetable_t pagetable = proc_pagetable(p);
+    if (pagetable == 0)
+        return -1;
+
+    uint64 sz = 0;
+    uint64 alloc_sz = PGROUNDUP(image_sz);
+    if (alloc_sz == 0)
+        goto bad;
+
+    uint64 sz1 = uvmalloc(pagetable, 0, alloc_sz, PTE_R | PTE_W | PTE_X | PTE_U);
+    if (sz1 == 0)
+        goto bad;
+    sz = sz1;
+
+    for (uint64 off = 0; off < image_sz;)
+    {
+        uint64 pa = walkaddr(pagetable, off);
+        if (pa == 0)
+            goto bad;
+        uint64 n = PGSIZE - (off % PGSIZE);
+        if (n > image_sz - off)
+            n = image_sz - off;
+        memmove((void *)(pa + (off % PGSIZE)), image + off, n);
+        off += n;
+    }
+
+    sz = PGROUNDUP(sz);
+    sz1 = uvmalloc(pagetable, sz, sz + (USERSTACK_PAGES + 1) * PGSIZE, PTE_R | PTE_W | PTE_U);
+    if (sz1 == 0)
+        goto bad;
+    uvmclear(pagetable, sz1 - (USERSTACK_PAGES + 1) * PGSIZE);
+
+    uint64 sp = sz1;
+    uint64 stackbase = sp - USERSTACK_PAGES * PGSIZE;
+    uint64 ustack[MAXARG + 1];
+
+    for (int i = argc - 1; i >= 0; i--)
+    {
+        if (argv == 0 || argv[i] == 0)
+            goto bad;
+        int len = strlen(argv[i]) + 1;
+        sp -= len;
+        sp &= ~((uint64)15);
+        if (sp < stackbase)
+            goto bad;
+        if (copyout(pagetable, sp, argv[i], len) < 0)
+            goto bad;
+        ustack[i] = sp;
+    }
+    ustack[argc] = 0;
+
+    sp -= (argc + 1) * sizeof(uint64);
+    sp &= ~((uint64)15);
+    if (sp < stackbase)
+        goto bad;
+    if (copyout(pagetable, sp, ustack, (argc + 1) * sizeof(uint64)) < 0)
+        goto bad;
+
+    struct trapframe *tf = p->trapframe;
+    uint64 oldsz = p->sz;
+    pagetable_t old = p->pagetable;
+
+    tf->epc = entry;
+    tf->sp = sp;
+    tf->a0 = argc;
+    tf->a1 = sp;
+
+    p->pagetable = pagetable;
+    p->sz = sz1;
+    if (progname)
+        safestrcpy(p->name, progname, sizeof(p->name));
+
+    proc_freepagetable(old, oldsz);
+    return 0;
+
+bad:
+    if (pagetable)
+        proc_freepagetable(pagetable, sz);
+    return -1;
+}
 
 static int flags2perm(int flags)
 {
@@ -83,13 +190,15 @@ int do_exec(uint64 path_addr, uint64 argv_addr)
     }
     kargv[argc] = 0;
 
-    begin_op();
-    struct inode *ip = namei(path);
+    begin_transaction();
+    struct inode *ip = path_walk(path);
     if (ip == 0)
     {
-        end_op();
+    end_transaction();
+        const char *base = path_basename(path);
+        int r = do_exec_static(base ? base : path, kargv, argc);
         free_kargv(kargv, argc);
-        return -1;
+        return r;
     }
 
     ilock(ip);
@@ -119,7 +228,7 @@ int do_exec(uint64 path_addr, uint64 argv_addr)
             goto load_bad;
         if (ph.vaddr % PGSIZE != 0)
             goto load_bad;
-    uint64 sz1 = uvmalloc(pagetable, sz, ph.vaddr + ph.memsz, flags2perm(ph.flags));
+        uint64 sz1 = uvmalloc(pagetable, sz, ph.vaddr + ph.memsz, flags2perm(ph.flags));
         if (sz1 == 0)
             goto load_bad;
         sz = sz1;
@@ -128,7 +237,7 @@ int do_exec(uint64 path_addr, uint64 argv_addr)
     }
 
     iunlockput(ip);
-    end_op();
+    end_transaction();
     ip = 0;
 
     sz = PGROUNDUP(sz);
@@ -185,32 +294,59 @@ load_bad_cleanup:
     if (ip)
     {
         iunlockput(ip);
-        end_op();
+    end_transaction();
     }
     free_kargv(kargv, argc);
     return -1;
 
 bad:
     iunlockput(ip);
-    end_op();
+    end_transaction();
     free_kargv(kargv, argc);
     return -1;
 }
 
 int exec_program_for_proc(struct proc *p, const char *name, char *argv[], int argc)
 {
-    (void)p;
-    (void)name;
-    (void)argv;
-    (void)argc;
+    if (p == 0 || name == 0)
+        return -1;
+    if (argc < 0 || argc > MAXARG)
+        return -1;
+    if (argc > 0 && argv == 0)
+        return -1;
 
-    return -1;
+    const struct user_program *prog = find_user_program(name);
+    if (prog == 0)
+        return -1;
+
+    uint64 image_sz = prog->end - prog->start;
+    if (image_sz == 0)
+        return -1;
+
+    return exec_from_binary(p, name, prog->start, image_sz, 0, argv, argc);
 }
 
 int do_exec_static(const char *name, char *argv[], int argc)
 {
-    (void)name;
-    (void)argv;
-    (void)argc;
-    return -1;
+    struct proc *p = myproc();
+    if (p == 0 || name == 0)
+        return -1;
+    if (argc < 0 || argc > MAXARG)
+        return -1;
+    if (argc > 0 && argv == 0)
+        return -1;
+
+    const char *base = path_basename(name);
+    if (base == 0 || *base == '\0')
+        base = name;
+
+    const struct user_program *prog = find_user_program(base);
+    if (prog == 0)
+        return -1;
+
+    uint64 image_sz = prog->end - prog->start;
+    if (image_sz == 0)
+        return -1;
+
+    return exec_from_binary(p, base, prog->start, image_sz, 0, argv, argc);
 }

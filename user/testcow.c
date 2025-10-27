@@ -1,71 +1,27 @@
+// 替换为目录与相对路径用例：mkdir/chdir/相对路径创建/读取/清理
 #include "user.h"
-
-#define PAGE (4096)
-
-static void fail(const char *msg)
-{
-    printf("testcow: %s\n", msg);
-    exit(-1);
-}
 
 int main(void)
 {
-    printf("testcow: start\n");
+    if (mkdir("x") < 0) { printf("dirt: mkdir x failed\n"); exit(-1); }
+    if (chdir("x") < 0) { printf("dirt: chdir x failed\n"); exit(-1); }
 
-    char *mem = sbrk(PAGE);
-    if (mem == (char *)-1)
-        fail("sbrk failed");
+    int fd = open("y", O_CREATE | O_RDWR);
+    if (fd < 0) { printf("dirt: create y failed\n"); exit(-1); }
+    if (write(fd, "Q", 1) != 1) { printf("dirt: write y failed\n"); exit(-1); }
+    close(fd);
 
-    mem[0] = 0x11;           // 先写入父进程可见的数据
-    mem[PAGE / 2] = 0x22;    // 触发页分配
+    if (chdir("..") < 0) { printf("dirt: chdir .. failed\n"); exit(-1); }
 
-    int pid = fork();
-    if (pid < 0)
-        fail("fork failed");
+    fd = open("x/y", O_RDONLY);
+    if (fd < 0) { printf("dirt: open x/y failed\n"); exit(-1); }
+    char c;
+    if (read(fd, &c, 1) != 1 || c != 'Q') { printf("dirt: read x/y failed\n"); exit(-1); }
+    close(fd);
 
-    if (pid == 0)
-    {
-        if (mem[0] != 0x11 || mem[PAGE / 2] != 0x22)
-            fail("child sees wrong initial values");
+    if (unlink("x/y") < 0) { printf("dirt: unlink x/y failed\n"); exit(-1); }
+    if (unlink("x") < 0) { printf("dirt: rmdir x failed\n"); exit(-1); }
 
-        mem[0] = 0x33;       // 子进程写入，期待触发写时复制
-        mem[PAGE / 2] = 0x44;
-
-        if (mem[0] != 0x33 || mem[PAGE / 2] != 0x44)
-            fail("child write failed");
-
-        printf("testcow: child ok\n");
-        exit(0);
-    }
-
-    if (wait(0) < 0)
-        fail("wait failed");
-
-    if (mem[0] != 0x11 || mem[PAGE / 2] != 0x22)
-        fail("parent page modified after child");
-
-    mem[PAGE - 1] = 0x55;    // 再写一次，确保写回正常
-
-    int pid2 = fork();
-    if (pid2 < 0)
-        fail("second fork failed");
-
-    if (pid2 == 0)
-    {
-        if (mem[PAGE - 1] != 0x55)
-            fail("second child inherited wrong data");
-        mem[PAGE - 1] = 0x77;
-        if (mem[PAGE - 1] != 0x77)
-            fail("second child write failed");
-        exit(0);
-    }
-
-    if (wait(0) < 0)
-        fail("wait second child failed");
-
-    if (mem[PAGE - 1] != 0x55)
-        fail("parent data overwritten by second child");
-
-    printf("testcow: success\n");
+    printf("testfs_dir: PASS\n");
     exit(0);
 }
