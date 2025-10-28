@@ -1,7 +1,26 @@
+# Build artifacts
 *.o
-*.bin
 *.elf
-*.md
+*.bin
 *.out
-fs.img
+*.img
+
+# Tools
 tools/mkfs
+
+# Generated files
+fs.img
+kernel.elf
+kernel.bin
+
+# User binaries (except pre-existing ones)
+user/*.out
+user/*.bin
+!user/testswap.bin
+!user/initcode.bin
+
+# Kernel object files
+kernel/*.o
+kernel/trap/*.o
+user/testswap.bin
+user/initcode.bin

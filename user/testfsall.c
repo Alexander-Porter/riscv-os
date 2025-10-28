@@ -98,7 +98,7 @@ static void test_basic(void) {
 
 // ===== 并发访问测试 =====
 static void test_concurrent_access(void) {
-    printf("=== FS concurrent test ===\n");
+    printf("Testing concurrent file access…\n");
     const int nproc = 4;
     const int iterations = 30; // 降低迭代次数以在30秒内完成整体测试
     for (int i = 0; i < nproc; i++) {
@@ -128,7 +128,7 @@ static void test_concurrent_access(void) {
     }
     for (int i = 0; i < nproc; i++)
         wait(0);
-    printf("concurrent: PASS\n");
+    printf("Concurrent access test completed\n");
 }
 
 // ===== 简单性能测试 =====
@@ -164,43 +164,36 @@ static void small_files_bench(void) {
 }
 
 static void large_file_bench(void) {
-    // 使用 4KB 缓冲顺序写 1024 次，累计 4MB
-    const int buf_sz = 4096;
-    const int chunk_count = 1024;
-    const int kb = (chunk_count * buf_sz) / 1024;
-    char *large_buf = (char *)sbrk(buf_sz);
-    if (large_buf == (char *)-1) {
-        printf("perf_large_file: sbrk failed\n");
+    // 对齐指南：使用 4KB 缓冲写入，共 1024 次，合计 4MB 顺序写
+    const int kb = 4096; // 总写入 4096KB = 4MB
+    // 使用sbrk分配缓冲区以避免全局变量映射问题
+    char *buf = sbrk(4096);
+    if ((uint64)buf == 0xffffffffffffffff) {
+        printf("perf: sbrk failed\n");
         exit(-1);
     }
-    memset(large_buf, 0x5a, buf_sz);
-
+    memset(buf, 0x5a, 4096);
     uint64 t0 = rdtime();
     int fd = open("large_file", O_CREATE | O_RDWR);
     if (fd < 0) { printf("perf: open large_file failed\n"); exit(-1); }
-    for (int i = 0; i < chunk_count; i++) {
-        if (write(fd, large_buf, buf_sz) != buf_sz) { printf("perf: write large failed\n"); exit(-1); }
+    for (int i = 0; i < 1024; i++) { // 1024 * 4096B = 4MB
+        if (write(fd, buf, 4096) != 4096) { printf("perf: write large failed\n"); exit(-1); }
     }
     close(fd);
     uint64 t1 = rdtime();
     printf("perf_large_file: %dKB in %lu ticks\n", kb, (unsigned long)(t1 - t0));
     unlink("large_file");
-    if (sbrk(-buf_sz) == (char *)-1) {
-        printf("perf_large_file: sbrk shrink failed\n");
-        exit(-1);
-    }
 }
 
 static void test_perf(void) {
-    printf("=== FS perf tests ===\n");
-    // 先跑大文件基准，再跑小文件批量，覆盖日志提交路径
-    large_file_bench();
     small_files_bench();
+    large_file_bench();
     printf("testfs_perf: DONE\n");
 }
 
 int main(void) {
     test_basic();
+    // 将性能测试提前，以确保在30秒超时窗口内输出性能结果
     test_perf();
     test_concurrent_access();
     printf("testfs_all: PASS\n");

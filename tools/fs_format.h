@@ -5,7 +5,7 @@
 
 // 磁盘布局定义，供用户态 mkfs 工具使用（参考 xv6-riscv）。
 #define ROOTINO  1
-#define BSIZE    4096
+#define BSIZE    4096  // 修改为4KB以支持更大文件
 
 struct superblock {
     uint magic;

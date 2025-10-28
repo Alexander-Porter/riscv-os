@@ -342,6 +342,8 @@ uint64 sys_unlink(void)
     if (argstr(0, path, sizeof(path)) < 0)
         return -1;
 
+    // 注：保留安静，避免影响性能测试输出
+
     begin_transaction();
     char name[DIRSIZ];
     struct inode *dp = path_parent(path, name);
