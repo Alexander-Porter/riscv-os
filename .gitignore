@@ -24,3 +24,4 @@ kernel/*.o
 kernel/trap/*.o
 user/testswap.bin
 user/initcode.bin
+tools/mkfs

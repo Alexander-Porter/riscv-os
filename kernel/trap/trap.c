@@ -260,6 +260,38 @@ static int irq_priorities[MAX_IRQ_NUM] = {
     [IRQ_EXTERNAL] = IRQ_PRIORITY_HIGH, // 外部中断优先级高
 };
 
+// 将 IRQ 编号映射到 sie 寄存器对应的掩码位
+static inline uint64 irq_to_sie_mask(int irq)
+{
+    switch (irq)
+    {
+    case IRQ_TIMER:
+        return SIE_STIE;
+    case IRQ_EXTERNAL:
+        return SIE_SEIE;
+    case IRQ_SOFTWARE:
+        return SIE_SSIE;
+    default:
+        return 0;
+    }
+}
+
+// 根据 IRQ 获取优先级，未显式设置的中断默认视为低优先级
+static inline int get_irq_priority(int irq)
+{
+    if (irq < 0 || irq >= MAX_IRQ_NUM)
+        return IRQ_PRIORITY_LOW;
+
+    int prio = irq_priorities[irq];
+    if (prio < IRQ_PRIORITY_HIGH || prio > IRQ_PRIORITY_LOW)
+        return IRQ_PRIORITY_LOW;
+
+    if (prio == IRQ_PRIORITY_HIGH && irq != IRQ_EXTERNAL)
+        return IRQ_PRIORITY_LOW;
+
+    return prio;
+}
+
 /**
  * 处理特定中断号的所有注册处理函数，支持嵌套中断
  * 采用类似Linux的机制：禁用当前IRQ，开启全局中断允许其他IRQ嵌套
@@ -269,14 +301,60 @@ void handle_interrupt_chain(int irq)
     struct interrupt_desc *desc = interrupt_table[irq];
     if (!desc)
         return;
-    // 屏蔽当前IRQ源，保持关中断执行链上的处理函数，避免在内核态处理流程中被中断打断导致的重入/时序竞态
-    disable_interrupt(irq);
+    // 保存当前中断屏蔽配置与全局中断开关状态
+    uint64 saved_sie = r_sie();
+    int prev_intr = intr_get();
+    int prev_priority = current_priority;
+
+    int priority = get_irq_priority(irq);
+
+    nested_level++;
+    current_priority = priority;
+
+    // 计算新的 sie 掩码：禁止当前 IRQ 以及所有优先级不高于当前的 IRQ
+    uint64 new_sie = saved_sie & ~irq_to_sie_mask(irq);
+    const int candidates[] = {IRQ_EXTERNAL, IRQ_TIMER, IRQ_SOFTWARE};
+    for (int i = 0; i < (int)(sizeof(candidates) / sizeof(candidates[0])); i++)
+    {
+        int cand = candidates[i];
+        if (cand == irq)
+            continue;
+        int cand_priority = get_irq_priority(cand);
+        if (cand_priority >= priority)
+            new_sie &= ~irq_to_sie_mask(cand);
+    }
+    w_sie(new_sie);
+
+    // 如果存在更高优先级的中断源且之前是关中断，则临时开启全局中断以允许抢占
+    int allow_nested = 0;
+    for (int i = 0; i < (int)(sizeof(candidates) / sizeof(candidates[0])); i++)
+    {
+        int cand = candidates[i];
+        if (cand == irq)
+            continue;
+        int cand_priority = get_irq_priority(cand);
+        if (cand_priority < priority && (saved_sie & irq_to_sie_mask(cand)))
+        {
+            allow_nested = 1;
+            break;
+        }
+    }
+    if (allow_nested && !prev_intr)
+        intr_on();
+
     for (struct interrupt_desc *p = desc; p; p = p->next)
     {
         if (p->handler)
             p->handler();
     }
-    enable_interrupt(irq);
+
+    intr_off();
+    w_sie(saved_sie);
+    if (prev_intr)
+        intr_on();
+
+    current_priority = prev_priority;
+    nested_level--;
 }
 
 /**
