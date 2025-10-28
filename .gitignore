@@ -4,3 +4,4 @@
 *.md
 *.out
 fs.img
+tools/mkfs

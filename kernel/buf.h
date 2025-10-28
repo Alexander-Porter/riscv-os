@@ -3,7 +3,7 @@
 
 #include "sleeplock.h"
 
-#define BSIZE 1024 // 块大小，保持与 xv6 一致
+#define BSIZE 4096 // 块大小：4KB，与性能基准和 MAXFILE 需求匹配
 
 struct buf {
     int valid;             // 数据是否有效
