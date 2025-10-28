@@ -1,0 +1,14 @@
+SPHello OS - Lab 5: Process Management
+bd: memory sz is 134004736 bytes; allocate size array length 21
+bd: 0x34000 bytes unavailable
+Trap system initialized
+Timer initialized with interval 50000
+recover: done
+=== FS basic tests ===
+basic: PASS
+Testing concurrent file access…
+Concurrent access test completed
+perf_small_files: 16 files in 2804719 ticks
+perf_large_file: 256KB in 30146408 ticks
+testfs_perf: DONE
+testfs_all: PASS

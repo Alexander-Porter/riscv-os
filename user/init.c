@@ -14,14 +14,11 @@ static void run_child(const char *prog)
 
 int main(void)
 {
-    printf("init: starting tests\n");
-    // 依次运行的用户程序列表
+    printf("init: start testfsall\n");
+    // 本实验按指南要求：在 init 内部直接运行统一的文件系统测试 testfsall
+    // 这样可以在一次引导中完成基本/并发/性能三类用例，输出更集中
     static const char *const tests[] = {
-        "testprocess",    // 基础：创建/写入/读取/stat/目录
-        "testsyscall2",   // 链接/解除链接与内容验证
-        "testcow",        // 目录与相对路径
-        "testsbrkbench",  // 并发小文件创建/写入
-        "testfsperf"      // 性能测试（小文件+大文件）
+        "testfsall"
     };
 
 

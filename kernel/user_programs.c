@@ -16,6 +16,8 @@ extern uchar _binary_user_testfsperf_bin_start[];
 extern uchar _binary_user_testfsperf_bin_end[];
 extern uchar _binary_user_testfsrecover_bin_start[];
 extern uchar _binary_user_testfsrecover_bin_end[];
+extern uchar _binary_user_testfsall_bin_start[];
+extern uchar _binary_user_testfsall_bin_end[];
 
 static const struct user_program user_program_table[] = {
 #ifdef RECOVERY_INIT
@@ -33,6 +35,7 @@ static const struct user_program user_program_table[] = {
     {"testsbrkbench", _binary_user_testsbrkbench_bin_start, _binary_user_testsbrkbench_bin_end},
     {"testfsperf", _binary_user_testfsperf_bin_start, _binary_user_testfsperf_bin_end},
     {"testfsrecover", _binary_user_testfsrecover_bin_start, _binary_user_testfsrecover_bin_end},
+    {"testfsall", _binary_user_testfsall_bin_start, _binary_user_testfsall_bin_end},
 };
 
 const struct user_program *find_user_program(const char *name)

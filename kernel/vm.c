@@ -68,13 +68,25 @@ int mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm)
     pte_t *pte = walk(pagetable, a, 1);
     if (pte == 0)
       return -1;
-    if (*pte & PTE_V)
+    if (*pte & PTE_V) {
+      struct proc *mp = myproc();
+      void *ra = __builtin_return_address(0);
+      printf("mappages remap: pt=%p va=0x%lx pa=0x%lx ra=%p proc=%p name=%s\n",
+        pagetable, a, pa, ra, mp, mp ? mp->name : "<none>");
       panic("mappages: remap");
+    }
     *pte = PA2PTE(pa) | perm | PTE_V;
     if (a == last)
       break;
   }
   return 0;
+}
+
+// 查询某虚拟地址是否已有有效PTE（不要求PTE_U），用于诸如守护页等判断
+int pte_is_valid(pagetable_t pagetable, uint64 va)
+{
+  pte_t *pte = walk(pagetable, va, 0);
+  return pte && (*pte & PTE_V);
 }
 
 static void kvmmap(pagetable_t kpgtbl, uint64 va, uint64 pa, uint64 sz, int perm)

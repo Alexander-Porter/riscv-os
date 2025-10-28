@@ -29,8 +29,13 @@ void acquire(struct spinlock *lk)
 
 void release(struct spinlock *lk)
 {
-    if (!holding(lk))
+    if (!holding(lk)) {
+        struct cpu *c = mycpu();
+        printf("release panic: lock=%s locked=%d lk.cpu=%p curcpu=%p ra=%p\n",
+               lk->name ? lk->name : "(null)", lk->locked, lk->cpu, c,
+               __builtin_return_address(0));
         panic("release");
+    }
 
     lk->cpu = 0;
     __sync_synchronize();

@@ -342,13 +342,15 @@ uint64 sys_unlink(void)
     if (argstr(0, path, sizeof(path)) < 0)
         return -1;
 
+    // 注：保留安静，避免影响性能测试输出
+
     begin_transaction();
     char name[DIRSIZ];
     struct inode *dp = path_parent(path, name);
     if (dp == 0)
     {
     end_transaction();
-        return -1;
+    return -1;
     }
 
     ilock(dp);
@@ -356,7 +358,7 @@ uint64 sys_unlink(void)
     {
         iunlockput(dp);
     end_transaction();
-        return -1;
+    return -1;
     }
 
     uint off;
@@ -365,7 +367,7 @@ uint64 sys_unlink(void)
     {
         iunlockput(dp);
     end_transaction();
-        return -1;
+    return -1;
     }
     ilock(ip);
     if (ip->nlink < 1)

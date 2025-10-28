@@ -99,6 +99,8 @@ int copyin(pagetable_t pagetable, void *dst, uint64 srcva, uint64 len);
 int copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max);
 int mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm);
 int cow_allocpage(pagetable_t pagetable, uint64 va);
+// 辅助：检查某地址的PTE是否有效（不要求PTE_U）
+int pte_is_valid(pagetable_t pagetable, uint64 va);
 
 
 #endif // __PAGING_H

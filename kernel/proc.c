@@ -690,6 +690,13 @@ void sleep(void *chan, struct spinlock *lk)
 {
     struct proc *p = myproc();
 
+    // 诊断：sleep 之前必须持有传入的自旋锁
+    if (lk == 0 || !holding(lk)) {
+        printf("sleep panic: not holding lock=%s ra=%p\n",
+               lk && lk->name ? lk->name : "(null)", __builtin_return_address(0));
+        panic("sleep not holding");
+    }
+
     acquire(&p->lock);
     release(lk);
 

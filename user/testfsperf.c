@@ -48,14 +48,16 @@ static void large_file_bench(void)
 {
     const int kb = 256; // 256KB (lighter workload to avoid buffer exhaustion)
     char buf[1024];
+    printf("Preparing %dKB large file write benchmark...\n", kb);
     memset(buf, 0x5a, sizeof(buf));
-
+    printf("Starting large file write benchmark...\n");
     uint64 t0 = rdtime();
     int fd = open("large_file", O_CREATE | O_RDWR);
     if (fd < 0) { printf("perf: open large_file failed\n"); exit(-1); }
     for (int i = 0; i < kb; i++) {
         if (write(fd, buf, sizeof(buf)) != (int)sizeof(buf)) { printf("perf: write large failed\n"); exit(-1); }
     }
+    printf("Large file write benchmark completed, closing file...\n");
     close(fd);
     uint64 t1 = rdtime();
     printf("perf_large_file: %dKB in %lu ticks\n", kb, (unsigned long)(t1 - t0));

@@ -99,13 +99,9 @@ void begin_transaction(void)
     while (1)
     {
         if (logstate.committing)
-        {
             sleep(&logstate, &logstate.lock);
-        }
         else if (logstate.lh.n + (logstate.outstanding + 1) * MAXOPBLOCKS > LOGSIZE)
-        {
             sleep(&logstate, &logstate.lock);
-        }
         else
         {
             logstate.outstanding++;

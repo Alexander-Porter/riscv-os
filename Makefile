@@ -75,7 +75,7 @@ $(INITCODE_OBJ): $(INITCODE_BIN)
 
 # 用户态通用对象与程序
 USER_COMMON_OBJ = user/start.o user/usys.o user/lib.o user/printf.o
-USER_PROGS = init  testsyscall2 testprocess testcow testsbrkbench testfsperf testfsrecover
+USER_PROGS = init  testsyscall2 testprocess testcow testsbrkbench testfsperf testfsrecover testfsall
 USER_PROG_OBJ = $(addprefix user/, $(addsuffix .o, $(USER_PROGS)))
 USER_OUT = $(addprefix user/, $(addsuffix .out, $(USER_PROGS)))
 USER_BIN = $(addprefix user/, $(addsuffix .bin, $(USER_PROGS)))
@@ -156,7 +156,7 @@ QEMUFLAGS += -device virtio-blk-device,drive=hd0,bus=virtio-mmio-bus.0
 
 # Run QEMU (preserve existing build and fs.img)
 qemu: $(KERNEL_BIN) $(FS_IMG)
-	$(QEMU) $(QEMUFLAGS)
+	-$(QEMU) $(QEMUFLAGS) || true
 
 # Run QEMU for GDB debugging (preserve existing build and fs.img)
 qemu-gdb: $(KERNEL_ELF) $(FS_IMG)

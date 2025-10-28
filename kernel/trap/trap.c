@@ -244,12 +244,8 @@ void kerneltrap(void)
                scause, sepc, r_stval());
         panic("kerneltrap");
     }
-    else if (which_dev == IRQ_TIMER)
-    {
-        struct proc *p = myproc();
-        if (p != 0 && p->state == RUNNING && sched_should_yield(p))
-            yield();
-    }
+    // 注意：不要在内核态直接进行调度切换，避免持锁期间被抢占导致死锁/饥饿。
+    // 仅在返回用户态(usertrap)时根据策略决定是否让出CPU。
 
     nested_level--;
 
@@ -271,43 +267,16 @@ static int irq_priorities[MAX_IRQ_NUM] = {
 void handle_interrupt_chain(int irq)
 {
     struct interrupt_desc *desc = interrupt_table[irq];
-
-    // 如果没有注册的处理函数，直接返回
     if (!desc)
-    {
         return;
-    }
-
-    // 获取当前IRQ线的优先级
-    int irq_priority = (irq < MAX_IRQ_NUM) ? irq_priorities[irq] : IRQ_PRIORITY_LOW;
-
-    // 放宽优先级门控：始终处理当前中断（避免遗漏顶层外部中断）
-    // 仅在已有更高优先级处理中时才阻止低优先级嵌套
-    int old_priority = current_priority;
-    if (irq_priority < current_priority) {
-        current_priority = irq_priority;
-    }
-
-
-
-    // 类似Linux：禁用当前IRQ线，但开启全局中断允许其他IRQ嵌套
-    disable_interrupt(irq); // 防止相同IRQ嵌套
-    intr_on();              // 允许其他更高优先级IRQ嵌套
-
-    // 执行该中断号上注册的所有处理函数（共享中断）
-    desc = interrupt_table[irq];
-    while (desc)
+    // 屏蔽当前IRQ源，保持关中断执行链上的处理函数，避免在内核态处理流程中被中断打断导致的重入/时序竞态
+    disable_interrupt(irq);
+    for (struct interrupt_desc *p = desc; p; p = p->next)
     {
-        if (desc->handler)
-        {
-            desc->handler();
-        }
-        desc = desc->next;
+        if (p->handler)
+            p->handler();
     }
-
-    // 恢复中断状态和优先级
-    enable_interrupt(irq); // 重新启用当前IRQ线
-    current_priority = old_priority;
+    enable_interrupt(irq);
 }
 
 /**
@@ -318,18 +287,13 @@ int devintr(void)
 {
     uint64 scause = r_scause();
 
-
     // 检查是否是中断（最高位为1）
     if (!(scause & 0x8000000000000000L))
-    {
         return 0; // 不是中断
-    }
 
-    // 提取中断号
     int irq = SCAUSE_TO_IRQ(scause);
     int hw_irq = 0;
 
-    // 根据中断类型进行特殊处理
     switch (irq)
     {
     case IRQ_TIMER:
@@ -599,12 +563,17 @@ static int handle_lazy_alloc(struct proc *p, uint64 va)
     if (fault >= p->sz)
         return -1; // 超出进程大小
 
-    // 检查是否已映射
+    // 检查是否已存在有效PTE（包括内核不可达的守护页等）
+    // 注意：walkaddr 仅在 PTE_U 置位时返回物理地址；
+    // 守护页通过清除 PTE_U 来禁止用户访问，但其 PTE 仍是有效的(PTE_V=1)。
+    // 若使用 walkaddr 判断，则会误认为未映射并尝试 remap，导致 mappages: remap。
+    // 因此这里直接查看底层 PTE 是否有效；若有效则不进行懒分配，由上层按异常处理。
     pagetable_t pt = p->pagetable;
+    if (pte_is_valid(pt, fault))
+        return -1; // 已有有效PTE（可能是守护页），不应在此分配
+
     extern void *alloc_page(void);
     extern int mappages(pagetable_t, uint64, uint64, uint64, int);
-    if (walkaddr(pt, fault) != 0)
-        return -1; // 已映射，非懒分配场景，交由其他处理（如 COW）
 
     char *mem = alloc_page();
     if (mem == 0)
