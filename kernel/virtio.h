@@ -74,6 +74,9 @@ struct virtio_blk_req {
 
 void virtio_disk_init(void);
 void virtio_disk_rw(struct buf *b, int write);
+// 新增：非阻塞提交与等待，用于批量 I/O
+void virtio_disk_submit(struct buf *b, int write);
+void virtio_disk_wait(struct buf *b);
 void virtio_disk_intr(void);
 
 #endif

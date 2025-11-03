@@ -162,11 +162,9 @@ void virtio_disk_init(void)
         panic("virtio_disk: register interrupt");
 }
 
-void virtio_disk_rw(struct buf *b, int write)
+static void __virtio_disk_submit_locked(struct buf *b, int write)
 {
     uint64 sector = b->blockno * (BSIZE / 512);
-
-    acquire(&disk.vdisk_lock);
 
     int idx[3];
     while (alloc3_desc(idx) < 0)
@@ -203,7 +201,18 @@ void virtio_disk_rw(struct buf *b, int write)
     __sync_synchronize();
 
     *R(VIRTIO_MMIO_QUEUE_NOTIFY) = 0;
+}
 
+void virtio_disk_submit(struct buf *b, int write)
+{
+    acquire(&disk.vdisk_lock);
+    __virtio_disk_submit_locked(b, write);
+    release(&disk.vdisk_lock);
+}
+
+void virtio_disk_wait(struct buf *b)
+{
+    acquire(&disk.vdisk_lock);
     while (b->disk == 1)
     {
         struct proc *p = myproc();
@@ -212,17 +221,35 @@ void virtio_disk_rw(struct buf *b, int write)
             release(&disk.vdisk_lock);
             while (b->disk == 1)
             {
-                __sync_synchronize(); // 等待磁盘中断完成
+                __sync_synchronize(); // 忙等（仅在无进程上下文时）
             }
             acquire(&disk.vdisk_lock);
             continue;
         }
         sleep(b, &disk.vdisk_lock);
     }
+    release(&disk.vdisk_lock);
+}
 
-    disk.info[idx[0]].b = 0;
-    free_chain(idx[0]);
-
+void virtio_disk_rw(struct buf *b, int write)
+{
+    acquire(&disk.vdisk_lock);
+    __virtio_disk_submit_locked(b, write);
+    while (b->disk == 1)
+    {
+        struct proc *p = myproc();
+        if (p == 0)
+        {
+            release(&disk.vdisk_lock);
+            while (b->disk == 1)
+            {
+                __sync_synchronize();
+            }
+            acquire(&disk.vdisk_lock);
+            continue;
+        }
+        sleep(b, &disk.vdisk_lock);
+    }
     release(&disk.vdisk_lock);
 }
 
@@ -242,6 +269,9 @@ void virtio_disk_intr(void)
         struct buf *b = disk.info[id].b;
         b->disk = 0;
         wakeup(b);
+        // 现在在中断里释放描述符链，便于批量提交时自动回收
+        disk.info[id].b = 0;
+        free_chain(id);
         disk.used_idx++;
     }
 

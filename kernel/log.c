@@ -53,30 +53,59 @@ static void write_head(void)
 
 static void install_trans(int recovering)
 {
-    for (int i = 0; i < logstate.lh.n; i++)
+    // 批量将日志块安装到 home 位置
+    const int WINDOW = 8; // 限制并发写窗口，匹配 virtio 队列深度
+    int n = logstate.lh.n;
+    for (int base = 0; base < n; base += WINDOW)
     {
-        struct buf *lbuf = bread(logstate.dev, logstate.start + i + 1);
-        struct buf *dbuf = bread(logstate.dev, logstate.lh.block[i]);
-        memmove(dbuf->data, lbuf->data, BSIZE);
-        bwrite(dbuf);
-        // 在正常提交路径中，解除对目标块的 pin，以避免耗尽缓冲区
-        if (!recovering)
-            bunpin(dbuf);
-        brelse(lbuf);
-        brelse(dbuf);
+        int cnt = (base + WINDOW <= n) ? WINDOW : (n - base);
+        struct buf *held[WINDOW];
+        for (int i = 0; i < cnt; i++)
+        {
+            int idx = base + i;
+            struct buf *lbuf = bread(logstate.dev, logstate.start + idx + 1);
+            struct buf *dbuf = bread(logstate.dev, logstate.lh.block[idx]);
+            memmove(dbuf->data, lbuf->data, BSIZE);
+            bsubmit_write(dbuf);
+            if (!recovering)
+                bunpin(dbuf);
+            brelse(lbuf);
+            held[i] = dbuf; // 保持锁到写完成
+        }
+        for (int i = 0; i < cnt; i++)
+        {
+            bwait(held[i]);
+            brelse(held[i]);
+        }
     }
 }
 
 static void write_log(void)
 {
-    for (int tail = 0; tail < logstate.lh.n; tail++)
+    // 批量提交到日志区域，窗口大小限制防止占满缓冲与队列
+    const int WINDOW = 8; // 与 virtio 队列大小一致
+    int n = logstate.lh.n;
+    for (int base = 0; base < n; base += WINDOW)
     {
-        struct buf *to = bread(logstate.dev, logstate.start + tail + 1);
-        struct buf *from = bread(logstate.dev, logstate.lh.block[tail]);
-        memmove(to->data, from->data, BSIZE);
-        bwrite(to);
-        brelse(from);
-        brelse(to);
+        int cnt = (base + WINDOW <= n) ? WINDOW : (n - base);
+        struct buf *held[WINDOW];
+        for (int i = 0; i < cnt; i++)
+        {
+            int tail = base + i;
+            struct buf *to = bread(logstate.dev, logstate.start + tail + 1);
+            struct buf *from = bread(logstate.dev, logstate.lh.block[tail]);
+            memmove(to->data, from->data, BSIZE);
+            // 非阻塞提交写入日志块
+            bsubmit_write(to);
+            brelse(from);
+            held[i] = to; // 保持 to 上的睡眠锁，直到完成
+        }
+        // 统一等待完成并释放
+        for (int i = 0; i < cnt; i++)
+        {
+            bwait(held[i]);
+            brelse(held[i]);
+        }
     }
 }
 
@@ -109,48 +138,49 @@ void begin_transaction(void)
             break;
         }
     }
+
 }
 
 void end_transaction(void)
-{
-    int do_commit = 0;
-
-    acquire(&logstate.lock);
-    logstate.outstanding--;
-    if (logstate.committing)
-        panic("log.committing");
-    if (logstate.outstanding == 0)
     {
-        do_commit = 1;
-        logstate.committing = 1;
-    }
-    else
-    {
-        wakeup(&logstate);
-    }
-    release(&logstate.lock);
+        int do_commit = 0;
 
-    if (!do_commit)
-        return;
-
-    if (logstate.lh.n > 0)
-    {
-        write_log();              // 1) 将数据块写入日志区域
-        write_head();             // 2) 写入日志头(真正的提交点)
-        if (force_crash_after_header) {
-            printf("log: commit header written, n=%d firstblk=%d\n", logstate.lh.n,
-                   logstate.lh.n > 0 ? logstate.lh.block[0] : -1);
-            panic("log: forced crash after header"); // 3) 模拟掉电：日志存在但未安装
+        acquire(&logstate.lock);
+        logstate.outstanding--;
+        if (logstate.committing)
+            panic("log.committing");
+        if (logstate.outstanding == 0)
+        {
+            do_commit = 1;
+            logstate.committing = 1;
         }
-        install_trans(0);        // 4) 安装到 home 位置
-        logstate.lh.n = 0;
-        write_head();            // 5) 清空日志
-    }
+        else
+        {
+            wakeup(&logstate);
+        }
+        release(&logstate.lock);
 
-    acquire(&logstate.lock);
-    logstate.committing = 0;
-    wakeup(&logstate);
-    release(&logstate.lock);
+        if (!do_commit)
+            return;
+
+        if (logstate.lh.n > 0)
+        {
+            write_log();              // 1) 将数据块写入日志区域（批量）
+            write_head();             // 2) 写入日志头(真正的提交点)
+            if (force_crash_after_header) {
+                printf("log: commit header written, n=%d firstblk=%d\n", logstate.lh.n,
+                       logstate.lh.n > 0 ? logstate.lh.block[0] : -1);
+                panic("log: forced crash after header"); // 3) 模拟掉电：日志存在但未安装
+            }
+            install_trans(0);        // 4) 安装到 home 位置（批量）
+            logstate.lh.n = 0;
+            write_head();            // 5) 清空日志
+        }
+
+        acquire(&logstate.lock);
+        logstate.committing = 0;
+        wakeup(&logstate);
+        release(&logstate.lock);
 }
 
 void recover_log(void)

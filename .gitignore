@@ -25,3 +25,5 @@ kernel/trap/*.o
 user/testswap.bin
 user/initcode.bin
 tools/mkfs
+.perf_run.log
+.perf_run_smallfs.log

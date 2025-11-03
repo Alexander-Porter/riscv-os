@@ -94,6 +94,23 @@ void bwrite(struct buf *b)
     disk_write_count++;
 }
 
+// 非阻塞提交：仅提交写请求，不等待完成；需后续调用 bwait
+void bsubmit_write(struct buf *b)
+{
+    if (!holdingsleep(&b->lock))
+        panic("bsubmit_write");
+    virtio_disk_submit(b, 1);
+    disk_write_count++;
+}
+
+// 等待指定缓冲的 I/O 完成
+void bwait(struct buf *b)
+{
+    if (!holdingsleep(&b->lock))
+        panic("bwait");
+    virtio_disk_wait(b);
+}
+
 void brelse(struct buf *b)
 {
     if (!holdingsleep(&b->lock))

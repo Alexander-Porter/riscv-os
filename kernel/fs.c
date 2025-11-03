@@ -167,27 +167,70 @@ void iupdate(struct inode *ip)
     brelse(bp);
 }
 
+// 下一个空闲块扫描的提示指针，避免每次都从0开始全盘扫描
+static uint next_free_b_hint = 0;
+
 static uint balloc(uint dev)
 {
-    for (uint b = 0; b < sb.size; b += BPB)
+    // 从提示位置开始扫描一次，必要时回绕到0继续扫描到提示位置
+    uint start = next_free_b_hint;
+    for (int pass = 0; pass < 2; pass++)
     {
-        struct buf *bp = bread(dev, BBLOCK(b, sb));
-        for (int bi = 0; bi < BPB && b + bi < sb.size; bi++)
+        for (uint b = start - (start % BPB); b < sb.size; b += BPB)
         {
-            int m = 1 << (bi % 8);
-            if ((bp->data[bi / 8] & m) == 0)
+            struct buf *bp = bread(dev, BBLOCK(b, sb));
+            int bi_start = (b == start - (start % BPB)) ? (start % BPB) : 0;
+            for (int bi = bi_start; bi < BPB && b + bi < sb.size; bi++)
             {
-                bp->data[bi / 8] |= m;
-                log_block_write(bp);
-                brelse(bp);
-                struct buf *bb = bread(dev, b + bi);
-                memset(bb->data, 0, BSIZE);
-                log_block_write(bb);
-                brelse(bb);
-                return b + bi;
+                int m = 1 << (bi % 8);
+                if ((bp->data[bi / 8] & m) == 0)
+                {
+                    bp->data[bi / 8] |= m;
+                    log_block_write(bp);
+                    brelse(bp);
+                    uint found = b + bi;
+                    struct buf *bb = bread(dev, found);
+                    memset(bb->data, 0, BSIZE);
+                    log_block_write(bb);
+                    brelse(bb);
+                    next_free_b_hint = found + 1;
+                    if (next_free_b_hint >= sb.size)
+                        next_free_b_hint = 0;
+                    return found;
+                }
             }
+            brelse(bp);
         }
-        brelse(bp);
+        // 回绕，再扫描一次直到原始起点
+        start = 0;
+        if (next_free_b_hint == 0)
+            break;
+        // 限定第二趟扫描的终点为原起点之前
+        for (uint b = 0; b < next_free_b_hint; b += BPB)
+        {
+            struct buf *bp = bread(dev, BBLOCK(b, sb));
+            for (int bi = 0; bi < BPB && b + bi < next_free_b_hint; bi++)
+            {
+                int m = 1 << (bi % 8);
+                if ((bp->data[bi / 8] & m) == 0)
+                {
+                    bp->data[bi / 8] |= m;
+                    log_block_write(bp);
+                    brelse(bp);
+                    uint found = b + bi;
+                    struct buf *bb = bread(dev, found);
+                    memset(bb->data, 0, BSIZE);
+                    log_block_write(bb);
+                    brelse(bb);
+                    next_free_b_hint = found + 1;
+                    if (next_free_b_hint >= sb.size)
+                        next_free_b_hint = 0;
+                    return found;
+                }
+            }
+            brelse(bp);
+        }
+        break;
     }
     panic("balloc: out of blocks");
     return 0; // unreachable

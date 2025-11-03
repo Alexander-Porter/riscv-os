@@ -8,7 +8,7 @@
 #define NFILE        100   // 系统范围内的文件表项数
 #define NINODE       50    // 内存中缓存的 inode 数
 #define NDEV         10    // 设备数量上限
-#define NBUF         30    // 块缓存数量，足够支撑日志系统
+#define NBUF         64    // 块缓存数量，适度增大以降低大文件顺序写的缓存回收压力
 
 #define MAXARG       16   // exec 最多支持的参数个数
 #define MAXARGLEN    128  // 单个参数的最大长度
@@ -17,10 +17,10 @@
 
 #define ROOTDEV      1     // 根文件系统所在设备号
 #define MAXPATH      128   // 路径最大长度
-#define MAXOPBLOCKS  10    // 单次文件系统操作占用的最大日志块数
+#define MAXOPBLOCKS  20    // 单次文件系统操作占用的最大日志块数（增大以减少提交频率）
 #define LOGBLOCKS    (MAXOPBLOCKS * 3)
 #define LOGSIZE      LOGBLOCKS
-#define FSSIZE       200000  // 文件系统总块数（仅用于 mkfs）
+#define FSSIZE       2000    // 文件系统总块数（仅用于 mkfs，与 xv6 对齐的小盘）
 
 // 懒分配 sbrk
 #ifndef ENABLE_LAZY_SBRK

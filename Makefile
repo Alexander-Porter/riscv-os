@@ -141,7 +141,7 @@ reset-fs:
 	rm -f $(FS_IMG)
 	$(MAKE) $(FS_IMG)
 
-# Host mkfs 工具
+# Host mkfs 工具（直接使用 kernel/param.h 中的 FSSIZE 默认值）
 $(MKFS): tools/mkfs.c tools/fs_format.h kernel/param.h kernel/stat.h kernel/types.h
 	$(HOSTCC) $(HOSTCFLAGS) -I. -o $@ tools/mkfs.c
 

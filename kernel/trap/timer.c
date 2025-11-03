@@ -5,7 +5,9 @@
 #include "../types.h"
 
 
-#define TIMER_INTERVAL 50000
+// 将定时器间隔从 50,000 周期（约 5ms @10MHz）调整为 1,000,000 周期（约 100ms @10MHz），
+// 与 xv6 缺省时钟节拍一致，减少高频时钟中断对 IO 基准测试的干扰。
+#define TIMER_INTERVAL 1000000
 
 
 /**

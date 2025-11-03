@@ -13,7 +13,7 @@ static void small_files_bench(void)
 {
     const int files = 16;
     const char *name = "smf";
-    uint64 t0 = rdtime();
+    uint64 t0 = uptime();
     for (int i = 0; i < files; i++) {
         char fn[32]; char num[16];
         strcpy(fn, name);
@@ -28,7 +28,7 @@ static void small_files_bench(void)
         if (write(fd, &v, sizeof(v)) != (int)sizeof(v)) { printf("perf: write failed\n"); exit(-1); }
         close(fd);
     }
-    uint64 t1 = rdtime();
+    uint64 t1 = uptime();
     printf("perf_small_files: %d files in %lu ticks\n", files, (unsigned long)(t1 - t0));
 
     // cleanup
@@ -51,7 +51,7 @@ static void large_file_bench(void)
     printf("Preparing %dKB large file write benchmark...\n", kb);
     memset(buf, 0x5a, sizeof(buf));
     printf("Starting large file write benchmark...\n");
-    uint64 t0 = rdtime();
+    uint64 t0 = uptime();
     int fd = open("large_file", O_CREATE | O_RDWR);
     if (fd < 0) { printf("perf: open large_file failed\n"); exit(-1); }
     for (int i = 0; i < kb; i++) {
@@ -59,7 +59,7 @@ static void large_file_bench(void)
     }
     printf("Large file write benchmark completed, closing file...\n");
     close(fd);
-    uint64 t1 = rdtime();
+    uint64 t1 = uptime();
     printf("perf_large_file: %dKB in %lu ticks\n", kb, (unsigned long)(t1 - t0));
     unlink("large_file");
 }
