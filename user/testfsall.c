@@ -135,7 +135,8 @@ static void test_concurrent_access(void) {
 static void small_files_bench(void) {
     const int files = 16;
     const char *name = "smf";
-    uint64 t0 = rdtime();
+    // 与 xv6 对齐：使用 uptime() 的“tick”为计时单位
+    uint64 t0 = uptime();
     for (int i = 0; i < files; i++) {
         char fn[32]; char num[16];
         strcpy(fn, name); int k = (int)strlen(fn);
@@ -149,7 +150,7 @@ static void small_files_bench(void) {
         if (write(fd, &v, sizeof(v)) != (int)sizeof(v)) { printf("perf: write failed\n"); exit(-1); }
         close(fd);
     }
-    uint64 t1 = rdtime();
+    uint64 t1 = uptime();
     printf("perf_small_files: %d files in %lu ticks\n", files, (unsigned long)(t1 - t0));
     // cleanup
     for (int i = 0; i < files; i++) {
@@ -164,23 +165,21 @@ static void small_files_bench(void) {
 }
 
 static void large_file_bench(void) {
-    // 对齐指南：使用 4KB 缓冲写入，共 1024 次，合计 4MB 顺序写
-    const int kb = 4096; // 总写入 4096KB = 4MB
-    // 使用sbrk分配缓冲区以避免全局变量映射问题
-    char *buf = sbrk(4096);
-    if ((uint64)buf == 0xffffffffffffffff) {
-        printf("perf: sbrk failed\n");
-        exit(-1);
-    }
-    memset(buf, 0x5a, 4096);
-    uint64 t0 = rdtime();
+    // 与 xv6 对齐：顺序写 256KB，按 1KB 块写入 256 次
+    const int kb = 256;
+    char buf[1024];
+    printf("Preparing %dKB large file write benchmark...\n", kb);
+    memset(buf, 0x5a, sizeof(buf));
+    printf("Starting large file write benchmark...\n");
+    uint64 t0 = uptime();
     int fd = open("large_file", O_CREATE | O_RDWR);
     if (fd < 0) { printf("perf: open large_file failed\n"); exit(-1); }
-    for (int i = 0; i < 1024; i++) { // 1024 * 4096B = 4MB
-        if (write(fd, buf, 4096) != 4096) { printf("perf: write large failed\n"); exit(-1); }
+    for (int i = 0; i < kb; i++) {
+        if (write(fd, buf, sizeof(buf)) != (int)sizeof(buf)) { printf("perf: write large failed\n"); exit(-1); }
     }
+    printf("Large file write benchmark completed, closing file...\n");
     close(fd);
-    uint64 t1 = rdtime();
+    uint64 t1 = uptime();
     printf("perf_large_file: %dKB in %lu ticks\n", kb, (unsigned long)(t1 - t0));
     unlink("large_file");
 }
@@ -197,8 +196,27 @@ int main(void) {
     test_perf();
     test_concurrent_access();
     printf("testfs_all: PASS\n");
-    if (getpid() == 1) {
-        for (;;) sleep(1000);
-    }
-    exit(0);
+    // —— 崩溃恢复测试：第一阶段 ——
+    // 正确顺序应为：
+    //  1) 预先创建空的标记文件（不在崩溃模式下），避免在“创建事务”的提交点就崩溃
+    //  2) 开启“提交后崩溃”模式
+    //  3) 重新打开并写入内容，触发一次写事务，在写完日志头后 panic
+    int fd = open("RECOVERY_MARK", O_CREATE | O_RDWR);
+    if (fd < 0) { printf("crash-stage1: create mark failed\n"); exit(-1); }
+    close(fd);
+
+    // 现在开启“提交后崩溃”模式：在写入数据的提交点（写完日志头）panic
+    debugfs(10);
+
+    fd = open("RECOVERY_MARK", O_RDWR);
+    if (fd < 0) { printf("crash-stage1: reopen mark failed\n"); exit(-1); }
+    const char *msg = "journal-ok";
+    int n = (int)strlen(msg);
+    if (write(fd, msg, n) != n) { printf("crash-stage1: write failed\n"); exit(-1); }
+    close(fd);
+    // 正常情况下，上面的提交过程会在内核中 panic，不会到达此处
+    printf("crash-stage1: WARN: forced crash did not trigger\n");
+    crash();
+    // 不可达
+    return 0;
 }

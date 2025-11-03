@@ -1,9 +1,0 @@
-SPHello OS - Lab 5: Process Management
-bd: memory sz is 134008832 bytes; allocate size array length 21
-bd: 0x33000 bytes unavailable
-Trap system initialized
-Timer initialized with interval 50000
-virtio probe: magic=0x74726976 version=2 device=2 vendor=0x554d4551
-perf_small_files: 16 files in 3494390 ticks
-perf_large_file: 256KB in 29931062 ticks
-testfs_perf: DONE

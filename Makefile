@@ -75,7 +75,8 @@ $(INITCODE_OBJ): $(INITCODE_BIN)
 
 # 用户态通用对象与程序
 USER_COMMON_OBJ = user/start.o user/usys.o user/lib.o user/printf.o
-USER_PROGS = init  testsyscall2 testprocess testcow testsbrkbench testfsperf testfsrecover testfsall
+# 仅保留 Lab7 相关用户程序：init、综合测试（testfsall）、崩溃恢复测试（testfsrecover）
+USER_PROGS = init testfsrecover testfsall
 USER_PROG_OBJ = $(addprefix user/, $(addsuffix .o, $(USER_PROGS)))
 USER_OUT = $(addprefix user/, $(addsuffix .out, $(USER_PROGS)))
 USER_BIN = $(addprefix user/, $(addsuffix .bin, $(USER_PROGS)))
@@ -127,7 +128,7 @@ $(KERNEL_ELF): $(OBJ) $(EXTRA_USER_OBJ)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 # Clean up
-.PHONY: all clean qemu qemu-gdb
+.PHONY: all clean qemu qemu-gdb recover
 
 clean:
 	rm -f $(KERNEL_ELF) $(KERNEL_BIN) $(OBJ) \
@@ -154,9 +155,11 @@ QEMUFLAGS += -global virtio-mmio.force-legacy=false
 QEMUFLAGS += -drive file=$(FS_IMG),if=none,format=raw,id=hd0
 QEMUFLAGS += -device virtio-blk-device,drive=hd0,bus=virtio-mmio-bus.0
 
-# Run QEMU (preserve existing build and fs.img)
-qemu: $(KERNEL_BIN) $(FS_IMG)
-	-$(QEMU) $(QEMUFLAGS) || true
+# xv6 风格：单次 QEMU 运行，由 init 统一编排测试（testfsall）
+qemu:
+	$(MAKE) clean
+	$(MAKE) all $(FS_IMG)
+	$(QEMU) $(QEMUFLAGS)
 
 # Run QEMU for GDB debugging (preserve existing build and fs.img)
 qemu-gdb: $(KERNEL_ELF) $(FS_IMG)
@@ -168,40 +171,8 @@ qemu-gdb: $(KERNEL_ELF) $(FS_IMG)
 qemu-noclean: $(KERNEL_ELF) $(FS_IMG)
 	$(QEMU) $(QEMUFLAGS)
 
-# Two-stage crash recovery test:
-#  1) build with RECOVERY_INIT so init is testfsrecover; first run crashes
-#  2) run again (without cleaning) to verify recovery and show PASS
-.PHONY: crash-test crash-test-stage1 crash-test-stage2
-
-# Stage 1：运行并触发崩溃，输出通过 tail 展示，避免在非交互 TTY 中丢失 QEMU 标准输出
-crash-test-stage1:
-	$(MAKE) EXTRA_CFLAGS="-DRECOVERY_INIT" all
-	@# 为了保证 Stage 1 一定是“第一次运行”，强制重置干净的 fs.img
-	$(MAKE) reset-fs
-	@echo "[CrashTest] Stage 1: run and crash (timeout enforced)"
-	rm -f .crash_stage1.log
-	timeout 10s $(QEMU) $(QEMUFLAGS) -serial file:.crash_stage1.log -monitor none || true
-	@echo "[CrashTest] Stage 1 output (tail):"
-	@tail -n 200 .crash_stage1.log || true
-
-# Stage 2：直接重启，不清理镜像；同样用 tail 展示
-crash-test-stage2:
-	@echo "[CrashTest] Stage 2: reboot without cleaning to verify recovery"
-	rm -f .crash_stage2.log
-	timeout 20s $(QEMU) $(QEMUFLAGS) -serial file:.crash_stage2.log -monitor none || true
-	@echo "[CrashTest] Stage 2 output (tail):"
-	@tail -n 200 .crash_stage2.log || true
-
-# 组合目标：按顺序执行两个阶段
-crash-test: crash-test-stage1 crash-test-stage2
-
-# Performance-only run: boot directly into performance test as init
-.PHONY: perf-test
-perf-test:
-	$(MAKE) clean
-	$(MAKE) EXTRA_CFLAGS="-DPERF_INIT" all $(FS_IMG)
-	rm -f .perf_run.log
-	timeout 60s $(QEMU) $(QEMUFLAGS) -serial file:.perf_run.log -monitor none || true
-	@sleep 1
-	@echo "[PerfTest] Output (tail):"
-	@tail -n 200 .perf_run.log || true
+# 恢复验证：单次 QEMU 运行（使用 RECOVERY_INIT 作为 init 执行 testfsrecover），
+# 是否恢复成功由用户态程序与内核输出自行给出 PASS/日志提示
+recover: $(FS_IMG)
+	$(MAKE) -B EXTRA_CFLAGS="-DRECOVERY_INIT" all
+	$(QEMU) $(QEMUFLAGS)
