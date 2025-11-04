@@ -1,3 +1,5 @@
+// 块缓存实现：缓存磁盘块，LRU替换，支持异步I/O
+
 #include "types.h"
 #include "param.h"
 #include "spinlock.h"
@@ -6,27 +8,31 @@
 #include "global_func.h"
 #include "virtio.h"
 
+// 全局块缓存：64个缓冲区，LRU双向链表
 struct {
     struct spinlock lock;
     struct buf buf[NBUF];
-    struct buf head;
+    struct buf head;  // 哨兵节点：head.next最新，head.prev最旧
 } bcache;
 
 static struct buf *bget(uint dev, uint blockno);
 
-// 统计信息：缓冲命中/未命中与磁盘I/O次数
+// 性能统计
 int buffer_cache_hits = 0;
 int buffer_cache_misses = 0;
 int disk_read_count = 0;
 int disk_write_count = 0;
 
+// binit: 初始化块缓存，在main()中启动时调用
 void binit(void)
 {
     initlock(&bcache.lock, "bcache");
 
+    // 创建空的循环链表
     bcache.head.prev = &bcache.head;
     bcache.head.next = &bcache.head;
 
+    // 所有缓冲区加入链表
     for (struct buf *b = bcache.buf; b < bcache.buf + NBUF; b++)
     {
         b->next = bcache.head.next;
@@ -39,10 +45,12 @@ void binit(void)
     }
 }
 
+// bget: 获取块的缓冲区，先查缓存再LRU替换
 static struct buf *bget(uint dev, uint blockno)
 {
     acquire(&bcache.lock);
 
+    // 先在缓存中找
     for (struct buf *b = bcache.head.next; b != &bcache.head; b = b->next)
     {
         if (b->dev == dev && b->blockno == blockno)
@@ -55,6 +63,7 @@ static struct buf *bget(uint dev, uint blockno)
         }
     }
 
+    // 没找到，从尾部(LRU)找空闲的
     for (struct buf *b = bcache.head.prev; b != &bcache.head; b = b->prev)
     {
         if (b->refcnt == 0)
@@ -74,6 +83,7 @@ static struct buf *bget(uint dev, uint blockno)
     return 0;
 }
 
+// bread: 读块，如果缓存没有就从磁盘读
 struct buf *bread(uint dev, uint blockno)
 {
     struct buf *b = bget(dev, blockno);
@@ -86,6 +96,7 @@ struct buf *bread(uint dev, uint blockno)
     return b;
 }
 
+// bwrite: 同步写块，阻塞等待完成
 void bwrite(struct buf *b)
 {
     if (!holdingsleep(&b->lock))
@@ -94,7 +105,7 @@ void bwrite(struct buf *b)
     disk_write_count++;
 }
 
-// 非阻塞提交：仅提交写请求，不等待完成；需后续调用 bwait
+// bsubmit_write: 异步写块，不等待完成
 void bsubmit_write(struct buf *b)
 {
     if (!holdingsleep(&b->lock))
@@ -103,7 +114,7 @@ void bsubmit_write(struct buf *b)
     disk_write_count++;
 }
 
-// 等待指定缓冲的 I/O 完成
+// bwait: 等待异步I/O完成
 void bwait(struct buf *b)
 {
     if (!holdingsleep(&b->lock))
@@ -111,6 +122,7 @@ void bwait(struct buf *b)
     virtio_disk_wait(b);
 }
 
+// brelse: 释放缓冲区，refcnt=0时移到链表头(标记最近使用)
 void brelse(struct buf *b)
 {
     if (!holdingsleep(&b->lock))
@@ -120,10 +132,13 @@ void brelse(struct buf *b)
 
     acquire(&bcache.lock);
     b->refcnt--;
+    
     if (b->refcnt == 0)
     {
+        // 从当前位置移除
         b->next->prev = b->prev;
         b->prev->next = b->next;
+        // 插入链表头(最近使用位置)
         b->next = bcache.head.next;
         b->prev = &bcache.head;
         bcache.head.next->prev = b;
@@ -132,6 +147,7 @@ void brelse(struct buf *b)
     release(&bcache.lock);
 }
 
+// bpin: 固定缓冲区，防止被LRU替换(日志系统用)
 void bpin(struct buf *b)
 {
     acquire(&bcache.lock);
@@ -139,6 +155,7 @@ void bpin(struct buf *b)
     release(&bcache.lock);
 }
 
+// bunpin: 取消固定
 void bunpin(struct buf *b)
 {
     acquire(&bcache.lock);

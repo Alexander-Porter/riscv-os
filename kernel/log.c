@@ -30,6 +30,7 @@ void log_set_crash_mode(int enable)
     force_crash_after_header = enable ? 1 : 0;
 }
 
+// read_head: 从磁盘读日志头到内存
 static void read_head(void)
 {
     struct buf *buf = bread(logstate.dev, logstate.start);
@@ -40,6 +41,7 @@ static void read_head(void)
     brelse(buf);
 }
 
+// write_head: 写日志头到磁盘，这是事务的提交点(原子操作)
 static void write_head(void)
 {
     struct buf *buf = bread(logstate.dev, logstate.start);
@@ -51,15 +53,18 @@ static void write_head(void)
     brelse(buf);
 }
 
+// install_trans: 将日志块安装到实际位置，批量异步写(窗口=8)
 static void install_trans(int recovering)
 {
-    // 批量将日志块安装到 home 位置
-    const int WINDOW = 8; // 限制并发写窗口，匹配 virtio 队列深度
+    const int WINDOW = 8;
     int n = logstate.lh.n;
+    
     for (int base = 0; base < n; base += WINDOW)
     {
         int cnt = (base + WINDOW <= n) ? WINDOW : (n - base);
         struct buf *held[WINDOW];
+        
+        // 批量提交写请求
         for (int i = 0; i < cnt; i++)
         {
             int idx = base + i;
@@ -70,8 +75,10 @@ static void install_trans(int recovering)
             if (!recovering)
                 bunpin(dbuf);
             brelse(lbuf);
-            held[i] = dbuf; // 保持锁到写完成
+            held[i] = dbuf;
         }
+        
+        // 统一等待完成
         for (int i = 0; i < cnt; i++)
         {
             bwait(held[i]);
@@ -80,27 +87,28 @@ static void install_trans(int recovering)
     }
 }
 
+// write_log: 将修改的块写入日志区，批量异步写
 static void write_log(void)
 {
-    // 批量提交到日志区域，窗口大小限制防止占满缓冲与队列
-    const int WINDOW = 8; // 与 virtio 队列大小一致
+    const int WINDOW = 8;
     int n = logstate.lh.n;
+    
     for (int base = 0; base < n; base += WINDOW)
     {
         int cnt = (base + WINDOW <= n) ? WINDOW : (n - base);
         struct buf *held[WINDOW];
+        
         for (int i = 0; i < cnt; i++)
         {
             int tail = base + i;
             struct buf *to = bread(logstate.dev, logstate.start + tail + 1);
             struct buf *from = bread(logstate.dev, logstate.lh.block[tail]);
             memmove(to->data, from->data, BSIZE);
-            // 非阻塞提交写入日志块
             bsubmit_write(to);
             brelse(from);
-            held[i] = to; // 保持 to 上的睡眠锁，直到完成
+            held[i] = to;
         }
-        // 统一等待完成并释放
+        
         for (int i = 0; i < cnt; i++)
         {
             bwait(held[i]);
@@ -109,6 +117,7 @@ static void write_log(void)
     }
 }
 
+// log_init: 初始化日志系统，启动时调用
 void log_init(int dev, struct superblock *sb)
 {
     if (sizeof(struct logheader) >= BSIZE)
@@ -122,15 +131,16 @@ void log_init(int dev, struct superblock *sb)
     recover_log();
 }
 
+// begin_transaction: 开始文件系统事务，等待日志空间和提交完成
 void begin_transaction(void)
 {
     acquire(&logstate.lock);
     while (1)
     {
-        if (logstate.committing)
+        if (logstate.committing)  // 正在提交，等待
             sleep(&logstate, &logstate.lock);
         else if (logstate.lh.n + (logstate.outstanding + 1) * MAXOPBLOCKS > LOGSIZE)
-            sleep(&logstate, &logstate.lock);
+            sleep(&logstate, &logstate.lock);  // 日志可能满，等待
         else
         {
             logstate.outstanding++;
@@ -138,51 +148,56 @@ void begin_transaction(void)
             break;
         }
     }
-
 }
 
+// end_transaction: 结束事务，最后一个操作时提交日志
+// 提交流程：write_log(批量) -> write_head(提交点) -> install_trans(批量) -> 清日志
 void end_transaction(void)
+{
+    int do_commit = 0;
+
+    acquire(&logstate.lock);
+    logstate.outstanding--;
+    if (logstate.committing)
+        panic("log.committing");
+    
+    if (logstate.outstanding == 0)
     {
-        int do_commit = 0;
-
-        acquire(&logstate.lock);
-        logstate.outstanding--;
-        if (logstate.committing)
-            panic("log.committing");
-        if (logstate.outstanding == 0)
-        {
-            do_commit = 1;
-            logstate.committing = 1;
-        }
-        else
-        {
-            wakeup(&logstate);
-        }
-        release(&logstate.lock);
-
-        if (!do_commit)
-            return;
-
-        if (logstate.lh.n > 0)
-        {
-            write_log();              // 1) 将数据块写入日志区域（批量）
-            write_head();             // 2) 写入日志头(真正的提交点)
-            if (force_crash_after_header) {
-                printf("log: commit header written, n=%d firstblk=%d\n", logstate.lh.n,
-                       logstate.lh.n > 0 ? logstate.lh.block[0] : -1);
-                panic("log: forced crash after header"); // 3) 模拟掉电：日志存在但未安装
-            }
-            install_trans(0);        // 4) 安装到 home 位置（批量）
-            logstate.lh.n = 0;
-            write_head();            // 5) 清空日志
-        }
-
-        acquire(&logstate.lock);
-        logstate.committing = 0;
+        do_commit = 1;
+        logstate.committing = 1;
+    }
+    else
+    {
         wakeup(&logstate);
-        release(&logstate.lock);
+    }
+    release(&logstate.lock);
+
+    if (!do_commit)
+        return;
+
+    if (logstate.lh.n > 0)
+    {
+        write_log();
+        write_head();  // 提交点
+        
+        if (force_crash_after_header) {
+            printf("log: commit header written, n=%d firstblk=%d\n", logstate.lh.n,
+                   logstate.lh.n > 0 ? logstate.lh.block[0] : -1);
+            panic("log: forced crash after header");
+        }
+        
+        install_trans(0);
+        logstate.lh.n = 0;
+        write_head();  // 清日志
+    }
+
+    acquire(&logstate.lock);
+    logstate.committing = 0;
+    wakeup(&logstate);
+    release(&logstate.lock);
 }
 
+// recover_log: 启动时恢复未完成的事务
 void recover_log(void)
 {
     read_head();
@@ -190,13 +205,15 @@ void recover_log(void)
         printf("recover: found n=%d firstblk=%d\n", logstate.lh.n,
                logstate.lh.block[0]);
     }
-    install_trans(1);
+    install_trans(1);  // 重放日志
     logstate.lh.n = 0;
     write_head();
     if (logstate.lh.n == 0)
         printf("recover: done\n");
 }
 
+// log_block_write: 记录要写的块，提交时会写入日志
+// 日志吸收：同一块多次修改只记录一次
 void log_block_write(struct buf *b)
 {
     if (logstate.lh.n >= LOGSIZE || logstate.lh.n >= logstate.size - 1)
@@ -205,6 +222,8 @@ void log_block_write(struct buf *b)
         panic("log_write outside of trans");
 
     acquire(&logstate.lock);
+    
+    // 日志吸收：检查是否已在日志中
     for (int i = 0; i < logstate.lh.n; i++)
     {
         if (logstate.lh.block[i] == b->blockno)
@@ -214,6 +233,8 @@ void log_block_write(struct buf *b)
             return;
         }
     }
+    
+    // 新块，加入日志并pin住(防止被LRU替换)
     logstate.lh.block[logstate.lh.n] = b->blockno;
     logstate.lh.n++;
     bpin(b);

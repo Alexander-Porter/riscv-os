@@ -1,3 +1,5 @@
+// 文件系统核心：inode管理、块分配、目录和路径解析
+
 #include "types.h"
 #include "param.h"
 #include "memlayout.h"
@@ -16,6 +18,7 @@ static inline uint min(uint a, uint b)
 
 struct superblock sb;
 
+// readsb: 从磁盘块1读取超级块
 void readsb(int dev, struct superblock *sbp)
 {
     struct buf *b = bread(dev, 1);
@@ -23,12 +26,13 @@ void readsb(int dev, struct superblock *sbp)
     brelse(b);
 }
 
-// 内存 inode 缓存
+// inode缓存：50个inode槽，自旋锁保护表，睡眠锁保护单个inode
 struct {
     struct spinlock lock;
     struct inode inode[NINODE];
 } icache;
 
+// iinit: 初始化inode缓存，启动时调用
 void iinit(void)
 {
     initlock(&icache.lock, "icache");
@@ -38,11 +42,14 @@ void iinit(void)
     }
 }
 
+// iget: 获取inode缓存项，先查缓存再分配空槽，返回未锁定的inode
 static struct inode *iget(uint dev, uint inum)
 {
     struct inode *empty = 0;
 
     acquire(&icache.lock);
+    
+    // 先在缓存中找
     for (struct inode *ip = icache.inode; ip < icache.inode + NINODE; ip++)
     {
         if (ip->ref > 0 && ip->dev == dev && ip->inum == inum)
@@ -55,6 +62,7 @@ static struct inode *iget(uint dev, uint inum)
             empty = ip;
     }
 
+    // 分配新槽
     if (empty == 0)
         panic("iget: no inodes");
 
@@ -62,11 +70,12 @@ static struct inode *iget(uint dev, uint inum)
     ip->dev = dev;
     ip->inum = inum;
     ip->ref = 1;
-    ip->valid = 0;
+    ip->valid = 0;  // 数据未加载，ilock时读盘
     release(&icache.lock);
     return ip;
 }
 
+// ialloc: 分配新inode，扫描磁盘找type=0的，设置类型后返回
 struct inode *ialloc(uint dev, short type)
 {
     for (uint inum = 1; inum < sb.ninodes; inum++)
@@ -84,9 +93,10 @@ struct inode *ialloc(uint dev, short type)
         brelse(bp);
     }
     panic("ialloc: no inodes");
-    return 0; // unreachable
+    return 0;
 }
 
+// idup: 增加inode引用计数
 struct inode *idup(struct inode *ip)
 {
     acquire(&icache.lock);
@@ -95,6 +105,7 @@ struct inode *idup(struct inode *ip)
     return ip;
 }
 
+// ilock: 锁定inode并从磁盘加载数据(若valid=0)
 void ilock(struct inode *ip)
 {
     if (ip == 0 || ip->ref < 1)
@@ -106,12 +117,14 @@ void ilock(struct inode *ip)
     {
         struct buf *bp = bread(ip->dev, IBLOCK(ip->inum, sb));
         struct dinode *dip = (struct dinode *)bp->data + ip->inum % IPB;
+        
         ip->type = dip->type;
         ip->major = dip->major;
         ip->minor = dip->minor;
         ip->nlink = dip->nlink;
         ip->size = dip->size;
         memmove(ip->addrs, dip->addrs, sizeof(ip->addrs));
+        
         brelse(bp);
         ip->valid = 1;
         if (ip->type == 0)
@@ -119,6 +132,7 @@ void ilock(struct inode *ip)
     }
 }
 
+// iunlock: 解锁inode
 void iunlock(struct inode *ip)
 {
     if (ip == 0 || !holdingsleep(&ip->lock) || ip->ref < 1)
@@ -127,14 +141,17 @@ void iunlock(struct inode *ip)
     releasesleep(&ip->lock);
 }
 
+// iput: 减少引用计数，ref=0且nlink=0时删除inode
 void iput(struct inode *ip)
 {
     acquire(&icache.lock);
+    
     if (ip->ref == 1 && ip->valid && ip->nlink == 0)
     {
         release(&icache.lock);
+        
         ilock(ip);
-        itrunc(ip);
+        itrunc(ip);   // 释放所有块
         ip->type = 0;
         iupdate(ip);
         releasesleep(&ip->lock);
@@ -142,44 +159,51 @@ void iput(struct inode *ip)
         acquire(&icache.lock);
         ip->valid = 0;
     }
+    
     ip->ref--;
     release(&icache.lock);
 }
 
+// iunlockput: 解锁+释放引用
 void iunlockput(struct inode *ip)
 {
     iunlock(ip);
     iput(ip);
 }
 
-// 将内存 inode 回写到磁盘
+// iupdate: 将内存inode写回磁盘
 void iupdate(struct inode *ip)
 {
     struct buf *bp = bread(ip->dev, IBLOCK(ip->inum, sb));
     struct dinode *dip = (struct dinode *)bp->data + ip->inum % IPB;
+    
     dip->type = ip->type;
     dip->major = ip->major;
     dip->minor = ip->minor;
     dip->nlink = ip->nlink;
     dip->size = ip->size;
     memmove(dip->addrs, ip->addrs, sizeof(ip->addrs));
+    
     log_block_write(bp);
     brelse(bp);
 }
 
-// 下一个空闲块扫描的提示指针，避免每次都从0开始全盘扫描
+// 块分配优化：记录上次找到的空闲块位置
 static uint next_free_b_hint = 0;
 
+// balloc: 分配数据块，用位图扫描+hint优化，两趟搜索
 static uint balloc(uint dev)
 {
-    // 从提示位置开始扫描一次，必要时回绕到0继续扫描到提示位置
     uint start = next_free_b_hint;
+    
+    // 从hint开始扫描
     for (int pass = 0; pass < 2; pass++)
     {
         for (uint b = start - (start % BPB); b < sb.size; b += BPB)
         {
             struct buf *bp = bread(dev, BBLOCK(b, sb));
             int bi_start = (b == start - (start % BPB)) ? (start % BPB) : 0;
+            
             for (int bi = bi_start; bi < BPB && b + bi < sb.size; bi++)
             {
                 int m = 1 << (bi % 8);
@@ -188,24 +212,28 @@ static uint balloc(uint dev)
                     bp->data[bi / 8] |= m;
                     log_block_write(bp);
                     brelse(bp);
+                    
                     uint found = b + bi;
                     struct buf *bb = bread(dev, found);
                     memset(bb->data, 0, BSIZE);
                     log_block_write(bb);
                     brelse(bb);
+                    
                     next_free_b_hint = found + 1;
                     if (next_free_b_hint >= sb.size)
                         next_free_b_hint = 0;
+                    
                     return found;
                 }
             }
             brelse(bp);
         }
-        // 回绕，再扫描一次直到原始起点
+        
+        // 第二趟：从0到hint
         start = 0;
         if (next_free_b_hint == 0)
             break;
-        // 限定第二趟扫描的终点为原起点之前
+        
         for (uint b = 0; b < next_free_b_hint; b += BPB)
         {
             struct buf *bp = bread(dev, BBLOCK(b, sb));
@@ -217,14 +245,17 @@ static uint balloc(uint dev)
                     bp->data[bi / 8] |= m;
                     log_block_write(bp);
                     brelse(bp);
+                    
                     uint found = b + bi;
                     struct buf *bb = bread(dev, found);
                     memset(bb->data, 0, BSIZE);
                     log_block_write(bb);
                     brelse(bb);
+                    
                     next_free_b_hint = found + 1;
                     if (next_free_b_hint >= sb.size)
                         next_free_b_hint = 0;
+                    
                     return found;
                 }
             }
@@ -232,10 +263,12 @@ static uint balloc(uint dev)
         }
         break;
     }
+    
     panic("balloc: out of blocks");
-    return 0; // unreachable
+    return 0;
 }
 
+// bfree: 释放数据块，位图清0
 static void bfree(int dev, uint b)
 {
     struct buf *bp = bread(dev, BBLOCK(b, sb));
@@ -248,6 +281,7 @@ static void bfree(int dev, uint b)
     brelse(bp);
 }
 
+// bmap: 映射文件内偏移到块号，按需分配直接块和间接块
 static uint bmap(struct inode *ip, uint bn)
 {
     if (bn < NDIRECT)
@@ -274,9 +308,10 @@ static uint bmap(struct inode *ip, uint bn)
         return addr;
     }
     panic("bmap: out of range");
-    return 0; // unreachable
+    return 0;
 }
 
+// itrunc: 释放inode所有数据块(直接块+间接块)
 void itrunc(struct inode *ip)
 {
     for (int i = 0; i < NDIRECT; i++)
@@ -305,6 +340,7 @@ void itrunc(struct inode *ip)
     iupdate(ip);
 }
 
+// readi: 从inode读数据到dst，逐块复制
 int readi(struct inode *ip, int user_dst, uint64 dst, uint off, uint n)
 {
     if (off > ip->size || off + n < off)
@@ -332,6 +368,7 @@ int readi(struct inode *ip, int user_dst, uint64 dst, uint off, uint n)
     return tot;
 }
 
+// writei: 向inode写数据，按需扩展文件
 int writei(struct inode *ip, int user_src, uint64 src, uint off, uint n)
 {
     if (off > ip->size || off + n < off)
@@ -366,6 +403,7 @@ int writei(struct inode *ip, int user_src, uint64 src, uint off, uint n)
     return tot;
 }
 
+// stati: 填充stat结构
 void stati(struct inode *ip, struct stat *st)
 {
     st->dev = ip->dev;
@@ -375,8 +413,7 @@ void stati(struct inode *ip, struct stat *st)
     st->size = ip->size;
 }
 
-// ====================== 调试与统计辅助 ======================
-// 统计空闲块数量：扫描位图，统计为0的比特数
+// count_free_blocks: 调试用，扫描位图统计空闲块数
 int count_free_blocks(void)
 {
     int free = 0;
@@ -394,7 +431,7 @@ int count_free_blocks(void)
     return free;
 }
 
-// 统计空闲inode数量：遍历所有inode磁盘块，type==0视为空闲
+// count_free_inodes: 调试用，遍历inode统计type=0的数量
 int count_free_inodes(void)
 {
     int free = 0;
@@ -411,6 +448,7 @@ int count_free_inodes(void)
 
 extern int buffer_cache_hits, buffer_cache_misses, disk_read_count, disk_write_count;
 
+// debug_filesystem_state: 打印文件系统状态和统计信息
 void debug_filesystem_state(void)
 {
     printf("=== Filesystem Debug Info ===\n");
@@ -425,6 +463,7 @@ void debug_filesystem_state(void)
     printf("Disk reads: %d  writes: %d\n", disk_read_count, disk_write_count);
 }
 
+// debug_inode_usage: 打印缓存中活跃的inode
 void debug_inode_usage(void)
 {
     printf("=== Inode Usage ===\n");
@@ -440,11 +479,13 @@ void debug_inode_usage(void)
     release(&icache.lock);
 }
 
+// namecmp: 目录项名字比较
 int namecmp(const char *s, const char *t)
 {
     return strncmp(s, t, DIRSIZ);
 }
 
+// dir_lookup: 在目录中查找name，返回inode
 struct inode *dir_lookup(struct inode *dp, char *name, uint *poff)
 {
     if (dp->type != T_DIR)
@@ -468,6 +509,7 @@ struct inode *dir_lookup(struct inode *dp, char *name, uint *poff)
     return 0;
 }
 
+// dir_link: 在目录中添加新的目录项
 int dir_link(struct inode *dp, char *name, uint inum)
 {
     struct dirent de;
@@ -493,6 +535,7 @@ int dir_link(struct inode *dp, char *name, uint inum)
     return 0;
 }
 
+// skipelem: 解析路径，提取一个路径分量到name
 static char *skipelem(char *path, char *name)
 {
     while (*path == '/')
@@ -515,6 +558,7 @@ static char *skipelem(char *path, char *name)
     return path;
 }
 
+// namex: 路径解析核心，nameiparent=1返回父目录
 static struct inode *namex(char *path, int nameiparent, char *name)
 {
     struct inode *ip;
@@ -526,17 +570,17 @@ static struct inode *namex(char *path, int nameiparent, char *name)
     while ((path = skipelem(path, name)) != 0)
     {
         ilock(ip);
-    if (ip->type != T_DIR)
+        if (ip->type != T_DIR)
         {
             iunlockput(ip);
             return 0;
         }
-    if (nameiparent && *path == '\0')
+        if (nameiparent && *path == '\0')
         {
             iunlock(ip);
             return ip;
         }
-    struct inode *next = dir_lookup(ip, name, 0);
+        struct inode *next = dir_lookup(ip, name, 0);
         if (next == 0)
         {
             iunlockput(ip);
@@ -553,12 +597,14 @@ static struct inode *namex(char *path, int nameiparent, char *name)
     return ip;
 }
 
+// path_walk: 解析完整路径，返回最终inode
 struct inode *path_walk(char *path)
 {
     char name[DIRSIZ];
     return namex(path, 0, name);
 }
 
+// path_parent: 返回父目录inode，name存最后一个分量
 struct inode *path_parent(char *path, char *name)
 {
     return namex(path, 1, name);

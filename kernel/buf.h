@@ -3,28 +3,31 @@
 
 #include "sleeplock.h"
 
-#define BSIZE 4096 // 块大小：4KB，与性能基准和 MAXFILE 需求匹配
+// 块缓存层：在文件系统和磁盘驱动之间，缓存磁盘块减少I/O
 
+#define BSIZE 4096  // 块大小4KB，比xv6的1KB大，提高吞吐
+
+// 块缓冲区：缓存一个磁盘块，用LRU链表管理
 struct buf {
-    int valid;             // 数据是否有效
-    int disk;              // 是否在磁盘传输中
-    uint dev;              // 设备号
-    uint blockno;          // 块号
-    struct sleeplock lock; // 睡眠锁保护数据区
-    uint refcnt;           // 引用计数
-    struct buf *prev;      // LRU 双向链表指针
+    int valid;      // 数据是否有效(1=已读取，0=需要读)
+    int disk;       // 是否正在I/O中
+    uint dev;       // 设备号
+    uint blockno;   // 块号
+    struct sleeplock lock;  // 睡眠锁保护数据
+    uint refcnt;    // 引用计数
+    struct buf *prev;  // LRU双向链表
     struct buf *next;
-    uchar data[BSIZE];     // 实际数据缓冲区
+    uchar data[BSIZE];  // 实际数据
 };
 
-
+// 操作接口
 void binit(void);
-struct buf *bread(uint dev, uint blockno);
-void bwrite(struct buf *b);
-void bsubmit_write(struct buf *b);
-void bwait(struct buf *b);
-void brelse(struct buf *b);
-void bpin(struct buf *b);
-void bunpin(struct buf *b);
+struct buf *bread(uint dev, uint blockno);  // 读块
+void bwrite(struct buf *b);                 // 同步写
+void bsubmit_write(struct buf *b);          // 异步写(不等待)
+void bwait(struct buf *b);                  // 等待I/O完成
+void brelse(struct buf *b);                 // 释放
+void bpin(struct buf *b);                   // 固定(防止替换)
+void bunpin(struct buf *b);                 // 取消固定
 
 #endif
