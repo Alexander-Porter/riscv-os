@@ -18,6 +18,133 @@ static void utoa10(unsigned v, char *buf) {
     buf[n] = 0;
 }
 
+static int stat_path(const char *path, struct stat *st) {
+    int fd = open(path, O_RDONLY);
+    if (fd < 0)
+        return -1;
+    int r = fstat(fd, st);
+    close(fd);
+    return r;
+}
+
+static const char *type_name(short type) {
+    switch (type) {
+    case T_DIR:
+        return "DIR";
+    case T_FILE:
+        return "FILE";
+    case T_DEVICE:
+        return "DEVICE";
+    case T_SYMLINK:
+        return "SYMLINK";
+    default:
+        return "UNKNOWN";
+    }
+}
+
+static void show_link_info(const char *label, const char *path) {
+    char buf[128];
+    int len = readlink(path, buf, sizeof(buf) - 1);
+    if (len >= 0) {
+        if (len >= (int)sizeof(buf))
+            len = sizeof(buf) - 1;
+        buf[len] = '\0';
+        struct stat st;
+        if (stat_path(path, &st) == 0)
+            printf("  %s: SYMLINK -> %s (target=%s nlink=%d)\n", label, buf, type_name(st.type), st.nlink);
+        else
+            printf("  %s: SYMLINK -> %s (target missing)\n", label, buf);
+        return;
+    }
+
+    struct stat st;
+    if (stat_path(path, &st) == 0)
+        printf("  %s: %s nlink=%d size=%lu\n", label, type_name(st.type), st.nlink, (unsigned long)st.size);
+    else
+        printf("  %s: <missing>\n", label);
+}
+
+static void demo_link_semantics(void) {
+    const char *base = "link_demo.txt";
+    const char *hard = "link_demo.hard";
+    const char *soft = "link_demo.soft";
+    const char *payload = "link-demo-data";
+
+    unlink(base);
+    unlink(hard);
+    unlink(soft);
+
+    int fd = open(base, O_CREATE | O_RDWR);
+    if (fd < 0) { printf("link-demo: create base failed\n"); exit(-1); }
+    if (write(fd, payload, (int)strlen(payload)) != (int)strlen(payload)) { printf("link-demo: write base failed\n"); exit(-1); }
+    close(fd);
+
+    if (link(base, hard) < 0) { printf("link-demo: create hard link failed\n"); exit(-1); }
+    if (symlink(base, soft) < 0) { printf("link-demo: create symlink failed\n"); exit(-1); }
+
+    printf("link-demo: initial state\n");
+    show_link_info("base", base);
+    show_link_info("hard", hard);
+    show_link_info("soft", soft);
+
+    printf("link-demo: unlink hard link %s\n", hard);
+    if (unlink(hard) < 0) { printf("link-demo: unlink hard failed\n"); exit(-1); }
+    struct stat info;
+    if (stat_path(base, &info) < 0) { printf("link-demo: stat base failed after hard unlink\n"); exit(-1); }
+    printf("link-demo: base retained with nlink=%d\n", info.nlink);
+    show_link_info("base", base);
+    show_link_info("soft", soft);
+
+    if (link(base, hard) < 0) { printf("link-demo: recreate hard link failed\n"); exit(-1); }
+
+    printf("link-demo: unlink symlink %s\n", soft);
+    if (unlink(soft) < 0) { printf("link-demo: unlink symlink failed\n"); exit(-1); }
+    if (stat_path(base, &info) < 0) { printf("link-demo: stat base failed after symlink unlink\n"); exit(-1); }
+    printf("link-demo: base unaffected by symlink removal, nlink=%d\n", info.nlink);
+    show_link_info("base", base);
+    show_link_info("hard", hard);
+
+    if (symlink(base, soft) < 0) { printf("link-demo: recreate symlink failed\n"); exit(-1); }
+
+    printf("link-demo: unlink original file %s\n", base);
+    if (unlink(base) < 0) { printf("link-demo: unlink base failed\n"); exit(-1); }
+    show_link_info("hard", hard);
+    show_link_info("soft", soft);
+
+    fd = open(hard, O_RDONLY);
+    if (fd < 0) { printf("link-demo: hard link missing after base removal\n"); exit(-1); }
+    char buf[32] = {0};
+    int r = read(fd, buf, sizeof(buf));
+    close(fd);
+    if (r != (int)strlen(payload) || strncmp(buf, payload, strlen(payload)) != 0) {
+        printf("link-demo: hard link data mismatch\n");
+        exit(-1);
+    }
+    //printf("link-demo: hard link still provides data \"%s\"\n", payload);
+
+    fd = open(soft, O_RDONLY);
+    if (fd >= 0) {
+        //printf("link-demo: symlink unexpectedly resolved after target removal\n");
+        close(fd);
+        exit(-1);
+    } else {
+        printf("link-demo: symlink open failed as expected after target removal\n");
+    }
+
+    char targetbuf[128];
+    int linklen = readlink(soft, targetbuf, sizeof(targetbuf) - 1);
+    if (linklen >= 0) {
+        targetbuf[linklen] = '\0';
+        //printf("link-demo: dangling symlink remembers target \"%s\"\n", targetbuf);
+    } else {
+        printf("link-demo: readlink failed unexpectedly\n");
+        exit(-1);
+    }
+
+    if (unlink(hard) < 0) { printf("link-demo: cleanup hard failed\n"); exit(-1); }
+    if (unlink(soft) < 0) { printf("link-demo: cleanup symlink failed\n"); exit(-1); }
+}
+
 // ===== 基本文件/目录测试 =====
 static void test_basic(void) {
     printf("=== FS basic tests ===\n");
@@ -94,6 +221,59 @@ static void test_basic(void) {
     }
 
     printf("basic: PASS\n");
+}
+
+static void test_symlink(void) {
+    printf("=== FS symlink tests ===\n");
+
+    int fd = open("sym_target", O_CREATE | O_RDWR);
+    if (fd < 0) { printf("symlink: create target failed\n"); exit(-1); }
+    const char *msg = "symlinks";
+    if (write(fd, msg, 8) != 8) { printf("symlink: write target failed\n"); exit(-1); }
+    close(fd);
+
+    if (symlink("sym_target", "sym_link") < 0) { printf("symlink: create link failed\n"); exit(-1); }
+    if (symlink("sym_link", "sym_chain") < 0) { printf("symlink: chain link failed\n"); exit(-1); }
+
+    fd = open("sym_link", O_RDONLY);
+    if (fd < 0) { printf("symlink: open link failed\n"); exit(-1); }
+    char buf[64] = {0};
+    int r = read(fd, buf, sizeof(buf));
+    close(fd);
+    if (r != 8 || strncmp(buf, msg, 8) != 0) { printf("symlink: read link mismatch\n"); exit(-1); }
+
+    fd = open("sym_chain", O_RDONLY);
+    if (fd < 0) { printf("symlink: open chain failed\n"); exit(-1); }
+    for (int i = 0; i < (int)sizeof(buf); i++) buf[i] = 0;
+    r = read(fd, buf, sizeof(buf));
+    close(fd);
+    if (r != 8 || strncmp(buf, msg, 8) != 0) { printf("symlink: chain read mismatch\n"); exit(-1); }
+
+    char target[64];
+    int n = readlink("sym_link", target, sizeof(target));
+    if (n != (int)strlen("sym_target") || strncmp(target, "sym_target", n) != 0) {
+        printf("symlink: readlink mismatch\n");
+        exit(-1);
+    }
+
+    if (mkdir("symdir") < 0) { printf("symlink: mkdir symdir failed\n"); exit(-1); }
+    if (symlink("../sym_target", "symdir/rel") < 0) { printf("symlink: relative link failed\n"); exit(-1); }
+    fd = open("symdir/rel", O_RDONLY);
+    if (fd < 0) { printf("symlink: open relative failed\n"); exit(-1); }
+    for (int i = 0; i < (int)sizeof(buf); i++) buf[i] = 0;
+    r = read(fd, buf, sizeof(buf));
+    close(fd);
+    if (r != 8 || strncmp(buf, msg, 8) != 0) { printf("symlink: relative read mismatch\n"); exit(-1); }
+
+    if (unlink("sym_chain") < 0) { printf("symlink: unlink chain failed\n"); exit(-1); }
+    if (unlink("sym_link") < 0) { printf("symlink: unlink link failed\n"); exit(-1); }
+    if (unlink("symdir/rel") < 0) { printf("symlink: unlink rel failed\n"); exit(-1); }
+    if (unlink("symdir") < 0) { printf("symlink: unlink symdir failed\n"); exit(-1); }
+    if (unlink("sym_target") < 0) { printf("symlink: cleanup target failed\n"); exit(-1); }
+
+    printf("=== Link semantics demo ===\n");
+    demo_link_semantics();
+    printf("symlink: PASS\n");
 }
 
 // ===== 并发访问测试 =====
@@ -192,6 +372,7 @@ static void test_perf(void) {
 
 int main(void) {
     test_basic();
+    test_symlink();
     debugfs(2);
     // 将性能测试提前，以确保在30秒超时窗口内输出性能结果
     test_perf();

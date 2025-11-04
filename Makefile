@@ -147,9 +147,16 @@ reset-fs:
 $(MKFS): tools/mkfs.c tools/fs_format.h kernel/param.h kernel/stat.h kernel/types.h
 	$(HOSTCC) $(HOSTCFLAGS) -I. -o $@ tools/mkfs.c
 
-# 生成初始文件系统镜像（仅包含根目录）
-$(FS_IMG): $(MKFS)
-	./$(MKFS) $(FS_IMG)
+# 生成初始文件系统镜像：打包指定的用户态 ELF 到根目录，便于通过标准 exec 从文件系统加载
+# 将常用的可执行文件（如 noop、testall、testfsall、testfsrecover）打入镜像；
+# 注意：这些 .out 文件会在后续清理步骤被删除，但此时已写入 fs.img。
+FS_INIT_FILES := \
+	user/noop.out \
+	user/testall.out \
+	user/testfsall.out
+
+$(FS_IMG): $(MKFS) $(FS_INIT_FILES)
+	./$(MKFS) $(FS_IMG) $(FS_INIT_FILES)
 
 QEMUFLAGS = -machine virt -bios none -kernel $(KERNEL_ELF) -nographic -m 128M
 QEMUFLAGS += -global virtio-mmio.force-legacy=false

@@ -216,6 +216,29 @@ int do_exec(uint64 path_addr, uint64 argv_addr)
 
     uint64 sz = 0;
     struct proghdr ph;
+    // 支持 ET_EXEC 原有路径；若为 ET_DYN（PIE 主程序），采用固定基址加载并应用最小重定位（R_RISCV_RELATIVE）
+    int is_dyn = (elf.type == ET_DYN);
+    uint64 base = 0;
+    if (is_dyn)
+    {
+        // 选择一个简单固定基址，避免覆盖用户栈区域；实际应做冲突检测，这里简化处理
+        base = 0x400000; // 4MB 基址
+    }
+
+    // 预扫描以便找出 PT_DYNAMIC 的虚拟地址
+    uint64 dynamic_vaddr = 0, dynamic_filesz = 0;
+    for (int i = 0, off = elf.phoff; i < elf.phnum; i++, off += sizeof(ph))
+    {
+        if (readi(ip, 0, (uint64)&ph, off, sizeof(ph)) != sizeof(ph))
+            goto load_bad;
+        if (ph.type == 2 /* PT_DYNAMIC */)
+        {
+            dynamic_vaddr = ph.vaddr;
+            dynamic_filesz = ph.filesz;
+        }
+    }
+
+    // 正式加载各 PT_LOAD 段
     for (int i = 0, off = elf.phoff; i < elf.phnum; i++, off += sizeof(ph))
     {
         if (readi(ip, 0, (uint64)&ph, off, sizeof(ph)) != sizeof(ph))
@@ -226,19 +249,76 @@ int do_exec(uint64 path_addr, uint64 argv_addr)
             goto load_bad;
         if (ph.vaddr + ph.memsz < ph.vaddr)
             goto load_bad;
-        if (ph.vaddr % PGSIZE != 0)
+        if ((ph.vaddr % PGSIZE) != 0)
             goto load_bad;
-        uint64 sz1 = uvmalloc(pagetable, sz, ph.vaddr + ph.memsz, flags2perm(ph.flags));
-        if (sz1 == 0)
-            goto load_bad;
-        sz = sz1;
-        if (loadseg(pagetable, ph.vaddr, ip, ph.off, ph.filesz) < 0)
+
+        uint64 seg_start = is_dyn ? (base + ph.vaddr) : ph.vaddr;
+        uint64 seg_end = seg_start + ph.memsz;
+
+        if (is_dyn)
+        {
+            if (uvmalloc_at(pagetable, seg_start, PGROUNDUP(seg_end), flags2perm(ph.flags)) < 0)
+                goto load_bad;
+        }
+        else
+        {
+            uint64 sz1 = uvmalloc(pagetable, sz, ph.vaddr + ph.memsz, flags2perm(ph.flags));
+            if (sz1 == 0)
+                goto load_bad;
+            sz = sz1;
+        }
+
+        // 将文件内容读入
+        if (loadseg(pagetable, seg_start, ip, ph.off, ph.filesz) < 0)
             goto load_bad;
     }
 
     iunlockput(ip);
     end_transaction();
     ip = 0;
+
+    // 若为 ET_DYN，应用最小动态重定位（仅 R_RISCV_RELATIVE）
+    if (is_dyn && dynamic_vaddr != 0 && dynamic_filesz >= sizeof(Elf64_Dyn))
+    {
+        // 动态段在内存中的地址
+        uint64 dyn_addr = base + dynamic_vaddr;
+        // 遍历 .dynamic，找出 RELA/RELASZ/RELAENT
+        uint64 rela = 0, relasz = 0, relaent = sizeof(Elf64_Rela);
+        for (uint64 off = 0; ; off += sizeof(Elf64_Dyn))
+        {
+            Elf64_Dyn d;
+            if (copyin(pagetable, &d, dyn_addr + off, sizeof(d)) < 0)
+                break;
+            if (d.d_tag == DT_NULL)
+                break;
+            if (d.d_tag == DT_RELA)     rela    = d.d_un.d_ptr ? (base + d.d_un.d_ptr) : 0;
+            if (d.d_tag == DT_RELASZ)   relasz  = d.d_un.d_val;
+            if (d.d_tag == DT_RELAENT)  relaent = d.d_un.d_val ? d.d_un.d_val : sizeof(Elf64_Rela);
+        }
+        if (rela && relasz)
+        {
+            for (uint64 off = 0; off < relasz; off += relaent)
+            {
+                Elf64_Rela r;
+                if (copyin(pagetable, &r, rela + off, sizeof(r)) < 0)
+                    break;
+                uint32 rtype = ELF64_R_TYPE(r.r_info);
+                // 仅处理 R_RISCV_RELATIVE：* (base + r_offset) = base + r_addend
+                if (rtype == R_RISCV_RELATIVE)
+                {
+                    uint64 *where_va = (uint64 *)(base + r.r_offset);
+                    uint64 val = base + r.r_addend;
+                    // 写入到用户页
+                    if (copyout(pagetable, (uint64)where_va, &val, sizeof(val)) < 0)
+                        goto load_bad_cleanup;
+                }
+                else
+                {
+                    // 其它重定位暂不支持：保持简单与可控
+                }
+            }
+        }
+    }
 
     sz = PGROUNDUP(sz);
     uint64 sz1 = uvmalloc(pagetable, sz, sz + (USERSTACK_PAGES + 1) * PGSIZE, PTE_W | PTE_R | PTE_U);
@@ -275,7 +355,7 @@ int do_exec(uint64 path_addr, uint64 argv_addr)
     uint64 oldsz = p->sz;
     pagetable_t old = p->pagetable;
 
-    tf->epc = elf.entry;
+    tf->epc = is_dyn ? (base + elf.entry) : elf.entry;
     tf->sp = sp;
     tf->a0 = argc;
     tf->a1 = sp;

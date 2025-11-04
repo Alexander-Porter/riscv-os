@@ -68,6 +68,10 @@ static void install_trans(int recovering)
         for (int i = 0; i < cnt; i++)
         {
             int idx = base + i;
+            // lbuf: 从日志设备中读取日志块的缓冲区，索引为 logstate.start + idx + 1。
+            //       主要用于读取日志元数据或日志条目。
+            // dbuf: 从日志设备中读取数据块的缓冲区，块号由 logstate.lh.block[idx] 指定。
+            //       主要用于读取日志中记录的实际数据块。
             struct buf *lbuf = bread(logstate.dev, logstate.start + idx + 1);
             struct buf *dbuf = bread(logstate.dev, logstate.lh.block[idx]);
             memmove(dbuf->data, lbuf->data, BSIZE);

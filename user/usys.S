@@ -200,3 +200,15 @@ crash:
 	ecall
 	ret
 
+	.globl symlink
+symlink:
+	li a7, SYS_symlink
+	ecall
+	ret
+
+	.globl readlink
+readlink:
+	li a7, SYS_readlink
+	ecall
+	ret
+

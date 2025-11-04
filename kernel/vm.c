@@ -340,6 +340,39 @@ int copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
   return got_null ? 0 : -1;
 }
 
+// 为指定的用户态虚拟地址区间 [va_start, va_end) 分配并建立映射，权限为 perm|PTE_U
+// 要求：va_start/va_end 均按页对齐，且 va_start < va_end
+// 返回 0 表示成功，-1 表示失败（部分映射失败会做最佳努力回滚）
+int uvmalloc_at(pagetable_t pagetable, uint64 va_start, uint64 va_end, int perm)
+{
+  if ((va_start % PGSIZE) != 0 || (va_end % PGSIZE) != 0 || va_end <= va_start)
+    return -1;
+  int uperm = (perm | PTE_U);
+  uint64 va;
+  for (va = va_start; va < va_end; va += PGSIZE)
+  {
+    char *mem = alloc_page();
+    if (mem == 0)
+      goto err;
+    memset(mem, 0, PGSIZE);
+    if (mappages(pagetable, va, PGSIZE, (uint64)mem, uperm) != 0)
+    {
+      free_page(mem);
+      goto err;
+    }
+  }
+  return 0;
+
+err:
+  // 回滚已映射的页面
+  if (va > va_start)
+  {
+    uint64 mapped_pages = (va - va_start) / PGSIZE;
+    uvmunmap(pagetable, va_start, mapped_pages, 1);
+  }
+  return -1;
+}
+
 int cow_allocpage(pagetable_t pagetable, uint64 va)
 {
   uint64 va0 = PGROUNDDOWN(va);

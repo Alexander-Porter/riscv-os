@@ -18,6 +18,8 @@ static inline uint min(uint a, uint b)
 
 struct superblock sb;
 
+#define MAX_SYMLINK_DEPTH 10
+
 // readsb: 从磁盘块1读取超级块
 void readsb(int dev, struct superblock *sbp)
 {
@@ -527,7 +529,7 @@ int dir_link(struct inode *dp, char *name, uint inum)
     }
 
     memset(de.name, 0, DIRSIZ);
-    safestrcpy(de.name, name, DIRSIZ);
+    memmove(de.name, name, DIRSIZ);
     de.inum = inum;
     if (writei(dp, 0, (uint64)&de, off, sizeof(de)) != sizeof(de))
         panic("dirlink");
@@ -558,16 +560,37 @@ static char *skipelem(char *path, char *name)
     return path;
 }
 
-// namex: 路径解析核心，nameiparent=1返回父目录
-static struct inode *namex(char *path, int nameiparent, char *name)
+static struct inode *namex_internal(char *path, int nameiparent, char *name, int follow_final, int depth, struct inode *start)
 {
-    struct inode *ip;
-    if (*path == '/')
-        ip = iget(ROOTDEV, ROOTINO);
-    else
-        ip = idup(myproc()->cwd);
+    if (depth > MAX_SYMLINK_DEPTH)
+    {
+        if (start)
+            iput(start);
+        return 0;
+    }
 
-    while ((path = skipelem(path, name)) != 0)
+    char local[MAXPATH];
+    safestrcpy(local, path, MAXPATH);
+    char *p = local;
+
+    struct inode *ip;
+    if (*local == '/')
+    {
+        if (start)
+            iput(start);
+        ip = iget(ROOTDEV, ROOTINO);
+    }
+    else if (start)
+    {
+        ip = start;
+        start = 0;
+    }
+    else
+    {
+        ip = idup(myproc()->cwd);
+    }
+
+    while ((p = skipelem(p, name)) != 0)
     {
         ilock(ip);
         if (ip->type != T_DIR)
@@ -575,20 +598,95 @@ static struct inode *namex(char *path, int nameiparent, char *name)
             iunlockput(ip);
             return 0;
         }
-        if (nameiparent && *path == '\0')
+        if (nameiparent && *p == '\0')
         {
             iunlock(ip);
             return ip;
         }
+
         struct inode *next = dir_lookup(ip, name, 0);
         if (next == 0)
         {
             iunlockput(ip);
             return 0;
         }
-        iunlockput(ip);
+
+        int is_last = (*p == '\0');
+        int follow = (!is_last) || (follow_final && !nameiparent && is_last);
+        int follow_symlink = 0;
+        if (follow)
+        {
+            ilock(next);
+            if (next->type == T_SYMLINK)
+                follow_symlink = 1;
+            else
+                iunlock(next);
+        }
+
+        if (follow && follow_symlink)
+        {
+            if (depth >= MAX_SYMLINK_DEPTH)
+            {
+                iunlockput(ip);
+                iput(next);
+                return 0;
+            }
+
+            char target[MAXPATH];
+            int len = readi(next, 0, (uint64)target, 0, MAXPATH - 1);
+            if (len < 0)
+            {
+                iunlock(next);
+                iunlockput(ip);
+                iput(next);
+                return 0;
+            }
+            if (len >= MAXPATH)
+                len = MAXPATH - 1;
+            target[len] = '\0';
+            iunlock(next);
+
+            struct inode *base = 0;
+            if (target[0] != '/')
+                base = idup(ip);
+
+            iunlockput(ip);
+            iput(next);
+
+            char newpath[MAXPATH];
+            safestrcpy(newpath, target, MAXPATH);
+            if (!is_last)
+            {
+                int clen = strlen(newpath);
+                if (clen > 0 && newpath[clen - 1] != '/')
+                {
+                    if (clen + 1 >= MAXPATH)
+                    {
+                        if (base)
+                            iput(base);
+                        return 0;
+                    }
+                    newpath[clen++] = '/';
+                    newpath[clen] = '\0';
+                }
+                int rest = strlen(p);
+                if (clen + rest >= MAXPATH)
+                {
+                    if (base)
+                        iput(base);
+                    return 0;
+                }
+                memmove(newpath + clen, p, rest + 1);
+            }
+
+            return namex_internal(newpath, nameiparent, name, follow_final, depth + 1, base);
+        }
+
+        iunlock(ip);
+        iput(ip);
         ip = next;
     }
+
     if (nameiparent)
     {
         iput(ip);
@@ -601,11 +699,18 @@ static struct inode *namex(char *path, int nameiparent, char *name)
 struct inode *path_walk(char *path)
 {
     char name[DIRSIZ];
-    return namex(path, 0, name);
+    return namex_internal(path, 0, name, 1, 0, 0);
+}
+
+// path_walk_nofollow: 解析路径但不跟随最后一级符号链接
+struct inode *path_walk_nofollow(char *path)
+{
+    char name[DIRSIZ];
+    return namex_internal(path, 0, name, 0, 0, 0);
 }
 
 // path_parent: 返回父目录inode，name存最后一个分量
 struct inode *path_parent(char *path, char *name)
 {
-    return namex(path, 1, name);
+    return namex_internal(path, 1, name, 1, 0, 0);
 }

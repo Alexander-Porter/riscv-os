@@ -275,6 +275,37 @@ uint64 sys_chdir(void)
     return 0;
 }
 
+uint64 sys_symlink(void)
+{
+    char target[MAXPATH], linkpath[MAXPATH];
+    if (argstr(0, target, sizeof(target)) < 0 || argstr(1, linkpath, sizeof(linkpath)) < 0)
+        return -1;
+
+    int tlen = strlen(target);
+    if (tlen + 1 > MAXPATH)
+        return -1;
+
+    begin_transaction();
+    struct inode *ip = create(linkpath, T_SYMLINK, 0, 0);
+    if (ip == 0)
+    {
+        end_transaction();
+        return -1;
+    }
+
+    int write_len = tlen + 1;
+    if (writei(ip, 0, (uint64)target, 0, write_len) != write_len)
+    {
+        iunlockput(ip);
+        end_transaction();
+        return -1;
+    }
+
+    iunlockput(ip);
+    end_transaction();
+    return 0;
+}
+
 uint64 sys_link(void)
 {
     char old[MAXPATH], new[MAXPATH];
@@ -334,6 +365,50 @@ static int isdirempty(struct inode *dp)
             return 0;
     }
     return 1;
+}
+
+uint64 sys_readlink(void)
+{
+    char path[MAXPATH];
+    uint64 bufaddr;
+    int buflen;
+    if (argstr(0, path, sizeof(path)) < 0 || argaddr(1, &bufaddr) < 0 || argint(2, &buflen) < 0)
+        return -1;
+    if (buflen <= 0)
+        return -1;
+
+    struct inode *ip = path_walk_nofollow(path);
+    if (ip == 0)
+        return -1;
+
+    ilock(ip);
+    if (ip->type != T_SYMLINK)
+    {
+        iunlockput(ip);
+        return -1;
+    }
+
+    int len = ip->size;
+    if (len > MAXPATH)
+        len = MAXPATH;
+    char target[MAXPATH];
+    int n = readi(ip, 0, (uint64)target, 0, len);
+    if (n < 0)
+    {
+        iunlockput(ip);
+        return -1;
+    }
+    if (n > 0 && target[n - 1] == '\0')
+        n--;
+    if (n > buflen)
+        n = buflen;
+    if (either_copyout(1, bufaddr, target, n) < 0)
+    {
+        iunlockput(ip);
+        return -1;
+    }
+    iunlockput(ip);
+    return n;
 }
 
 uint64 sys_unlink(void)

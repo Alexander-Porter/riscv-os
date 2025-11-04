@@ -28,6 +28,8 @@ int link(const char *old, const char *newp);
 int unlink(const char *path);
 int pipe(int fds[2]);
 int getpid(void);
+int symlink(const char *target, const char *linkpath);
+int readlink(const char *path, char *buf, int bufsiz);
 int sleep(int ticks);
 int yield(void);
 int setpriority(int prio);

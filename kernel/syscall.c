@@ -78,6 +78,8 @@ extern uint64 sys_chdir(void);
 extern uint64 sys_mkdir(void);
 extern uint64 sys_unlink(void);
 extern uint64 sys_link(void);
+extern uint64 sys_symlink(void);
+extern uint64 sys_readlink(void);
 extern uint64 sys_yield(void);
 extern uint64 sys_setpriority(void);
 extern uint64 sys_getpriority(void);
@@ -127,6 +129,8 @@ static uint64 (*syscalls[])(void) = {
     [SYS_link] = sys_link,
     [SYS_debugfs] = sys_debugfs,
     [SYS_crash] = sys_crash,
+    [SYS_symlink] = sys_symlink,
+    [SYS_readlink] = sys_readlink,
 };
 
 void syscall(void)

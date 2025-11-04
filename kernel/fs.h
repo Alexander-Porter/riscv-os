@@ -86,6 +86,7 @@ int dir_link(struct inode *dp, char *name, uint inum);
 
 // 路径解析
 struct inode *path_walk(char *path);
+struct inode *path_walk_nofollow(char *path);
 struct inode *path_parent(char *path, char *name);
 
 // 日志系统(崩溃一致性)

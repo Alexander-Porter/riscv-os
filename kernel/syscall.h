@@ -37,6 +37,8 @@
 #define SYS_link    39
 #define SYS_debugfs 40
 #define SYS_crash   41
+#define SYS_symlink 42
+#define SYS_readlink 43
 
 #ifndef __ASSEMBLER__
 void syscall(void);

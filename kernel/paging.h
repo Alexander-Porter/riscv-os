@@ -102,5 +102,8 @@ int cow_allocpage(pagetable_t pagetable, uint64 va);
 // 辅助：检查某地址的PTE是否有效（不要求PTE_U）
 int pte_is_valid(pagetable_t pagetable, uint64 va);
 
+// 在指定虚拟地址区间为用户态分配并建立映射，权限包含 PTE_U
+int uvmalloc_at(pagetable_t pagetable, uint64 va_start, uint64 va_end, int perm);
+
 
 #endif // __PAGING_H
