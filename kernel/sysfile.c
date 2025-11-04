@@ -420,8 +420,10 @@ uint64 sys_pipe(void)
         return -1;
     }
 
-    uint64 fds[2] = {fd0, fd1};
-    if (copyout(myproc()->pagetable, fdarray, fds, sizeof(fds)) < 0)
+    // 注意：用户态 pipe 原型为 int fds[2]，因此这里只能拷贝 2 个 int，
+    // 不能按 64-bit 数组大小拷贝，否则会覆盖用户栈相邻数据导致 fd 混乱。
+    int fds[2] = {fd0, fd1};
+    if (copyout(myproc()->pagetable, fdarray, fds, sizeof(int) * 2) < 0)
     {
         myproc()->ofile[fd0] = 0;
         myproc()->ofile[fd1] = 0;

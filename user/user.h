@@ -26,6 +26,7 @@ int mkdir(const char *path);
 int chdir(const char *path);
 int link(const char *old, const char *newp);
 int unlink(const char *path);
+int pipe(int fds[2]);
 int getpid(void);
 int sleep(int ticks);
 int yield(void);

@@ -366,6 +366,22 @@ void *kmalloc(uint64 nbytes)
     lst_push(&bd_sizes[k - 1].free, q);                      // 将后半部分q加入低一阶的空闲链表
   }
 
+  // 在释放锁前，若分配的块大小 >= 一页，则为块内每个页建立初始引用计数=1，
+  // 以匹配 free_page 中的对称减计数逻辑，避免下溢。
+  int blk_sz = BLK_SIZE(k);
+  if (blk_sz >= PGSIZE && page_ref != 0)
+  {
+    int pages = blk_sz / PGSIZE;
+    acquire(&ref_lock);
+    for (int i = 0; i < pages; i++)
+    {
+      int idx = page_index_from_pa((uint64)p + (uint64)i * PGSIZE);
+      if (idx >= 0)
+        page_ref[idx] = 1;
+    }
+    release(&ref_lock);
+  }
+
   release(&bd_lock);
   return p; // 返回分配到的内存地址
 }

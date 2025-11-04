@@ -75,13 +75,14 @@ $(INITCODE_OBJ): $(INITCODE_BIN)
 
 # 用户态通用对象与程序
 USER_COMMON_OBJ = user/start.o user/usys.o user/lib.o user/printf.o
-# 仅保留 Lab7 相关用户程序：init、综合测试（testfsall）、崩溃恢复测试（testfsrecover）
-USER_PROGS = init testfsrecover testfsall
+# 默认仅在 qemu 中运行 Lab7 相关（init→testfsall），但允许构建附加的综合测试程序
+USER_PROGS = init testfsrecover testfsall testall noop
 USER_PROG_OBJ = $(addprefix user/, $(addsuffix .o, $(USER_PROGS)))
 USER_OUT = $(addprefix user/, $(addsuffix .out, $(USER_PROGS)))
 USER_BIN = $(addprefix user/, $(addsuffix .bin, $(USER_PROGS)))
 USER_OBJ_BIN = $(addprefix kernel/, $(addsuffix _bin.o, $(USER_PROGS)))
 USER_CFLAGS = -Wall -Og -g -ffreestanding -nostdlib -fno-builtin -mcmodel=medany -fno-pie -no-pie -Iuser
+USER_CFLAGS += $(EXTRA_CFLAGS)
 
 user/%.out: user/%.o $(USER_COMMON_OBJ)
 	riscv64-unknown-elf-ld -N -T user/user.ld -o $@ $^
@@ -175,4 +176,11 @@ qemu-noclean: $(KERNEL_ELF) $(FS_IMG)
 # 是否恢复成功由用户态程序与内核输出自行给出 PASS/日志提示
 recover: $(FS_IMG)
 	$(MAKE) -B EXTRA_CFLAGS="-DRECOVERY_INIT" all
+	$(QEMU) $(QEMUFLAGS)
+
+# 附加功能综合测试：以 testall 作为 init 执行主体，单次 QEMU 运行
+.PHONY: testall
+testall:
+	$(MAKE) clean
+	$(MAKE) -B EXTRA_CFLAGS="-DTESTALL_INIT" all $(FS_IMG)
 	$(QEMU) $(QEMUFLAGS)

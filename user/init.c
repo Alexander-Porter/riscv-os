@@ -14,12 +14,16 @@ static void run_child(const char *prog)
 
 int main(void)
 {
+    // 缺省：Lab7 文件系统统一测试；若指定 TESTALL_INIT，则改为附加功能综合测试
+#ifdef TESTALL_INIT
+    printf("init: start testall (附加功能)\n");
+    static const char *const tests[] = { "testall" };
+#else
     printf("init: start testfsall\n");
     // 本实验按指南要求：在 init 内部直接运行统一的文件系统测试 testfsall
     // 这样可以在一次引导中完成基本/并发/性能三类用例，输出更集中
-    static const char *const tests[] = {
-        "testfsall"
-    };
+    static const char *const tests[] = { "testfsall" };
+#endif
 
 
     for (unsigned i = 0; i < sizeof(tests) / sizeof(tests[0]); i++)

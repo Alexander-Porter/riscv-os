@@ -10,8 +10,8 @@ struct pipe {
     char data[BSIZE];
     uint nread;     // 读取位置
     uint nwrite;    // 写入位置
-    int readopen;   // 读取端是否打开
-    int writeopen;  // 写入端是否打开
+    int rcount;     // 打开的读端 file 对象计数
+    int wcount;     // 打开的写端 file 对象计数
 };
 
 int pipealloc(struct file **f0, struct file **f1);

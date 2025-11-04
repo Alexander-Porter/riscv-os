@@ -160,11 +160,16 @@ int fileread(struct file *f, uint64 addr, int n)
 
 int filewrite(struct file *f, uint64 addr, int n)
 {
-    if (!f->writable)
+    if (!f->writable) {
+        printf("filewrite: not writable type=%d\n", f->type);
         return -1;
+    }
 
-    if (f->type == FD_PIPE)
+    if (f->type == FD_PIPE) {
+        // 诊断：确认走到了管道写路径
+        // printf("filewrite: FD_PIPE write n=%d\n", n);
         return pipewrite(f->pipe, addr, n);
+    }
 
     if (f->type == FD_DEVICE)
     {

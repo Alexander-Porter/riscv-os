@@ -12,16 +12,18 @@ static int pipeclose_locked(struct pipe *p, int writable)
 {
     if (writable)
     {
-        p->writeopen = 0;
+        if (p->wcount > 0)
+            p->wcount--;
         wakeup(&p->nread); // 唤醒等待写端的读者
     }
     else
     {
-        p->readopen = 0;
+        if (p->rcount > 0)
+            p->rcount--;
         wakeup(&p->nwrite); // 唤醒等待读端的写者
     }
 
-    if (p->readopen == 0 && p->writeopen == 0)
+    if (p->rcount == 0 && p->wcount == 0)
     {
         release(&p->lock);
         kfree(p);
@@ -42,8 +44,8 @@ int pipealloc(struct file **f0, struct file **f1)
     if ((p = (struct pipe *)kmalloc(sizeof(*p))) == 0)
         goto bad;
 
-    p->readopen = 1;
-    p->writeopen = 1;
+    p->rcount = 1;
+    p->wcount = 1;
     p->nread = 0;
     p->nwrite = 0;
     initlock(&p->lock, "pipe");
@@ -83,8 +85,10 @@ int pipewrite(struct pipe *p, uint64 addr, int n)
     acquire(&p->lock);
     while (i < n)
     {
-        if (p->readopen == 0 || killed(pr))
+        if (p->rcount == 0 || killed(pr))
         {
+            // 诊断输出，定位为何写入失败
+            printf("pipewrite: rcount=%d killed=%d\n", p->rcount, killed(pr));
             release(&p->lock);
             return -1;
         }
@@ -112,7 +116,7 @@ int piperead(struct pipe *p, uint64 addr, int n)
     int i;
     struct proc *pr = myproc();
     acquire(&p->lock);
-    while (p->nread == p->nwrite && p->writeopen)
+    while (p->nread == p->nwrite && p->wcount > 0)
     {
         if (killed(pr))
         {
