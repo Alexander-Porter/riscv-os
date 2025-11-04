@@ -192,9 +192,11 @@ static void test_perf(void) {
 
 int main(void) {
     test_basic();
+    debugfs(2);
     // 将性能测试提前，以确保在30秒超时窗口内输出性能结果
     test_perf();
     test_concurrent_access();
+    debugfs(2);
     printf("testfs_all: PASS\n");
     // —— 崩溃恢复测试：第一阶段 ——
     // 正确顺序应为：
