@@ -69,6 +69,7 @@ int semaphore_acquire(int semid)
         return -1;
     }
     sem->value--;
+    // printf("[sem] acquire id=%d value->%d pid=%d\n", semid, sem->value, myproc()->pid);
     release(&sem->lock);
     return 0;
 }
