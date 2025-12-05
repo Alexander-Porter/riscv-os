@@ -1,174 +1,113 @@
-// COW Fork 性能基准测试
+// COW Fork-Exec 性能基准：数千次 fork 之后立即 exec
+// 用于和 xv6 的无 COW 实现对比
 #include "user.h"
 
-#define TEST_PAGES 100  // 测试页面数
-#define PAGE_SIZE 4096
+#define PGSIZE 4096
+#define DEFAULT_ITERS 2000        // 默认循环次数（保持在超时限制内）
+#define DEFAULT_PARENT_PAGES 32   // 父进程触摸的页数，制造可见的内存复制开销
 
-// 测试1：fork时间对比
-static void test_fork_time(void) {
-    printf("=== Test 1: Fork Time ===\n");
-    
-    // 分配内存
-    char *mem = sbrk(TEST_PAGES * PAGE_SIZE);
-    if ((uint64)mem == 0xffffffffffffffff) {
-        printf("sbrk failed\n");
-        exit(-1);
+static int parse_int(const char *s, int def)
+{
+    // 简单的十进制解析，非法输入返回默认值
+    if (s == 0 || *s == 0)
+        return def;
+    int v = 0;
+    for (const char *p = s; *p; p++)
+    {
+        if (*p < '0' || *p > '9')
+            return def;
+        v = v * 10 + (*p - '0');
     }
-    
-    // 写入数据
-    for (int i = 0; i < TEST_PAGES * PAGE_SIZE; i += PAGE_SIZE) {
-        mem[i] = 'A';
-    }
-    
-    uint64 t0 = rdtime();
-    int pid = fork();
-    uint64 t1 = rdtime();
-    
-    if (pid < 0) {
-        printf("fork failed\n");
-        exit(-1);
-    }
-    
-    if (pid == 0) {
-        // 子进程：不修改内存，直接退出
-        exit(0);
-    } else {
-        // 父进程：等待子进程
-        wait(0);
-        printf("Fork time (COW): %lu ticks\n", t1 - t0);
-        printf("Memory size: %d KB\n", TEST_PAGES * 4);
+    return v;
+}
+
+// 触摸父进程的内存，确保页表映射生效
+static void touch_parent_pages(char *base, int pages)
+{
+    for (int i = 0; i < pages; i++)
+    {
+        base[i * PGSIZE] = (char)(i & 0xff);
     }
 }
 
-// 测试2：COW触发时的页错误开销
-static void test_cow_pagefault(void) {
-    printf("\n=== Test 2: COW Page Fault Overhead ===\n");
-    
-    char *mem = sbrk(TEST_PAGES * PAGE_SIZE);
-    if ((uint64)mem == 0xffffffffffffffff) {
-        printf("sbrk failed\n");
-        exit(-1);
-    }
-    
-    // 初始化内存
-    for (int i = 0; i < TEST_PAGES * PAGE_SIZE; i += PAGE_SIZE) {
-        mem[i] = 'B';
-    }
-    
-    int pid = fork();
-    if (pid < 0) {
-        printf("fork failed\n");
-        exit(-1);
-    }
-    
-    if (pid == 0) {
-        // 子进程：触发COW写入
-        uint64 t0 = rdtime();
-        for (int i = 0; i < TEST_PAGES * PAGE_SIZE; i += PAGE_SIZE) {
-            mem[i] = 'C';  // 触发COW
-        }
-        uint64 t1 = rdtime();
-        printf("Child COW write time: %lu ticks for %d pages\n", 
-               t1 - t0, TEST_PAGES);
-        exit(0);
-    } else {
-        wait(0);
-    }
-}
+// 实际的 fork-exec 基准循环：每次 fork 后立刻 exec 一个极轻量程序
+static void run_bench(int iters, int parent_pages)
+{
+    printf("[bench] iters=%d parent_pages=%d\n", iters, parent_pages);
 
-// 测试3：内存共享效率
-static void test_memory_sharing(void) {
-    printf("\n=== Test 3: Memory Sharing Efficiency ===\n");
-    
-    char *mem = sbrk(TEST_PAGES * PAGE_SIZE);
-    if ((uint64)mem == 0xffffffffffffffff) {
-        printf("sbrk failed\n");
+    // 父进程分配并触摸内存，便于观察 COW 与全量复制的差异
+    int total_bytes = parent_pages * PGSIZE;
+    char *mem = sbrk(total_bytes);
+    if (mem == (char *)-1)
+    {
+        printf("[bench] sbrk failed\n");
         exit(-1);
     }
-    
-    // 初始化
-    for (int i = 0; i < TEST_PAGES * PAGE_SIZE; i += PAGE_SIZE) {
-        mem[i] = 'D';
-    }
-    
-    printf("Parent allocated: %d KB\n", TEST_PAGES * 4);
-    
-    int pid = fork();
-    if (pid == 0) {
-        // 子进程：只读取，不写入（完全共享）
-        char sum = 0;
-        for (int i = 0; i < TEST_PAGES * PAGE_SIZE; i += PAGE_SIZE) {
-            sum += mem[i];
-        }
-        printf("Child read-only access, sum=%d (memory shared)\n", (int)sum);
-        exit(0);
-    } else {
-        wait(0);
-        printf("COW allows child to share parent's memory without copying\n");
-    }
-}
+    touch_parent_pages(mem, parent_pages);
 
-// 测试4：多进程场景
-static void test_multi_process(void) {
-    printf("\n=== Test 4: Multi-Process Scenario ===\n");
-    
-    #define NUM_CHILDREN 4
-    
-    char *mem = sbrk(50 * PAGE_SIZE);
-    if ((uint64)mem == 0xffffffffffffffff) {
-        printf("sbrk failed\n");
-        exit(-1);
-    }
-    
-    for (int i = 0; i < 50 * PAGE_SIZE; i += PAGE_SIZE) {
-        mem[i] = 'E';
-    }
-    
-    uint64 t0 = rdtime();
-    
-    for (int i = 0; i < NUM_CHILDREN; i++) {
+    uint64 t0 = uptime();
+    int ok = 0, fail = 0;
+
+    for (int i = 0; i < iters; i++)
+    {
         int pid = fork();
-        if (pid < 0) {
-            printf("fork %d failed\n", i);
+        if (pid < 0)
+        {
+            fail++;
+            // 回收可能残留的子进程，避免表满
+            wait(0);
+            continue;
+        }
+
+        if (pid == 0)
+        {
+            // 子进程立刻 exec 极小负载程序
+            char *argv_child[] = {"forkexec_child", 0};
+            exec("forkexec_child", argv_child);
+            printf("[bench] child exec failed\n");
             exit(-1);
         }
-        if (pid == 0) {
-            // 子进程：修改一小部分内存
-            for (int j = 0; j < 10 * PAGE_SIZE; j += PAGE_SIZE) {
-                mem[j] = 'F';
-            }
-            exit(0);
+
+        int status = 0;
+        if (wait(&status) < 0)
+        {
+            printf("[bench] wait failed at %d\n", i);
+            break;
         }
+        if (status == 0)
+            ok++;
+        else
+            fail++;
     }
-    
-    // 等待所有子进程
-    for (int i = 0; i < NUM_CHILDREN; i++) {
-        wait(0);
-    }
-    
-    uint64 t1 = rdtime();
-    printf("Created %d children with 200KB memory in %lu ticks\n", 
-           NUM_CHILDREN, t1 - t0);
-    printf("Each child modified only 40KB (COW optimization)\n");
+
+    uint64 t1 = uptime();
+    uint64 dt = t1 - t0;
+
+    printf("[bench] total ticks: %lu\n", dt);
+    printf("[bench] success=%d fail=%d\n", ok, fail);
+    printf("[bench] avg ticks/op: %lu\n", ok ? dt / ok : dt);
 }
 
-int main(void) {
-    printf("=== COW Fork Performance Benchmark ===\n\n");
-    
-    test_fork_time();
-    test_cow_pagefault();
-    test_memory_sharing();
-    test_multi_process();
-    
-    printf("\n=== Benchmark Complete ===\n");
-    printf("COW优化总结：\n");
-    printf("1. Fork时间短（只复制页表，不复制内存）\n");
-    printf("2. 内存共享效率高（只在写入时复制）\n");
-    printf("3. 多进程场景下内存使用更少\n");
-    printf("4. 页错误处理有少量开销，但总体收益显著\n");
-    
-    if (getpid() == 1) {
-        for (;;) sleep(1000);
+int main(int argc, char **argv)
+{
+    int iters = (argc > 1) ? parse_int(argv[1], DEFAULT_ITERS) : DEFAULT_ITERS;
+    int parent_pages = (argc > 2) ? parse_int(argv[2], DEFAULT_PARENT_PAGES) : DEFAULT_PARENT_PAGES;
+    if (iters < 1)
+        iters = DEFAULT_ITERS;
+    if (parent_pages < 1)
+        parent_pages = DEFAULT_PARENT_PAGES;
+
+    printf("=== COW Fork-Exec Benchmark ===\n");
+    printf("使用 uptime(ticks) 计时，便于与 xv6 对比\n");
+
+    run_bench(iters, parent_pages);
+
+    printf("=== Benchmark Done ===\n");
+    if (getpid() == 1)
+    {
+        // 作为 init 运行时防止 QEMU 立即退出
+        for (;;)
+            sleep(1000);
     }
     exit(0);
 }

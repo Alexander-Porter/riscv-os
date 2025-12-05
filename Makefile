@@ -76,7 +76,7 @@ $(INITCODE_OBJ): $(INITCODE_BIN)
 # 用户态通用对象与程序
 USER_COMMON_OBJ = user/start.o user/usys.o user/lib.o user/printf.o
 # 默认仅在 qemu 中运行 Lab7 相关（init→testfsall），但允许构建附加的综合测试程序
-USER_PROGS = init testfsrecover testfsall testall noop
+USER_PROGS = init testfsrecover testfsall testall noop testcowbench forkexec_child
 USER_PROG_OBJ = $(addprefix user/, $(addsuffix .o, $(USER_PROGS)))
 USER_OUT = $(addprefix user/, $(addsuffix .out, $(USER_PROGS)))
 USER_BIN = $(addprefix user/, $(addsuffix .bin, $(USER_PROGS)))
@@ -190,4 +190,11 @@ recover: $(FS_IMG)
 testall:
 	$(MAKE) clean
 	$(MAKE) -B EXTRA_CFLAGS="-DTESTALL_INIT" all $(FS_IMG)
+	$(QEMU) $(QEMUFLAGS)
+
+# Fork-Exec 基准测试：以 testcowbench 作为 init，便于自动计时比较
+.PHONY: bench
+bench:
+	$(MAKE) clean
+	$(MAKE) -B EXTRA_CFLAGS="-DBENCH_INIT" all $(FS_IMG)
 	$(QEMU) $(QEMUFLAGS)

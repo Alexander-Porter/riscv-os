@@ -12,6 +12,10 @@ extern uchar _binary_user_testall_bin_start[];
 extern uchar _binary_user_testall_bin_end[];
 extern uchar _binary_user_noop_bin_start[];
 extern uchar _binary_user_noop_bin_end[];
+extern uchar _binary_user_testcowbench_bin_start[];
+extern uchar _binary_user_testcowbench_bin_end[];
+extern uchar _binary_user_forkexec_child_bin_start[];
+extern uchar _binary_user_forkexec_child_bin_end[];
 
 static const struct user_program user_program_table[] = {
 #ifdef RECOVERY_INIT
@@ -20,6 +24,9 @@ static const struct user_program user_program_table[] = {
 #elif defined(TESTALL_INIT)
     // 特殊构建：用附加功能综合测试作为 init（便于单次 QEMU 在超时内结束）
     {"init", _binary_user_testall_bin_start, _binary_user_testall_bin_end},
+#elif defined(BENCH_INIT)
+    // 性能基准：直接进入 fork-exec 基准程序
+    {"init", _binary_user_testcowbench_bin_start, _binary_user_testcowbench_bin_end},
 #else
     {"init", _binary_user_init_bin_start, _binary_user_init_bin_end},
 #endif
@@ -27,6 +34,8 @@ static const struct user_program user_program_table[] = {
     {"testfsall", _binary_user_testfsall_bin_start, _binary_user_testfsall_bin_end},
     {"testall", _binary_user_testall_bin_start, _binary_user_testall_bin_end},
     {"noop", _binary_user_noop_bin_start, _binary_user_noop_bin_end},
+    {"testcowbench", _binary_user_testcowbench_bin_start, _binary_user_testcowbench_bin_end},
+    {"forkexec_child", _binary_user_forkexec_child_bin_start, _binary_user_forkexec_child_bin_end},
 };
 
 const struct user_program *find_user_program(const char *name)
