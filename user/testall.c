@@ -1,6 +1,4 @@
-// 仅保留：进程间通信（IPC）三种方式的验证
-// - 信号量 + 共享内存：生产者-消费者（有界环形缓冲区）
-// - 管道：客户端-服务器（逐字节发送，模拟传输延迟）
+
 
 #include "user.h"
 
@@ -59,7 +57,7 @@ static void test_ipc_prodcons_shm_sem(void)
             "large-cute-cat","small-cute-cat","large-annoying-cat","tiny-sleepy-cat",
             "angry-red-cat","smart-gray-cat","noisy-black-cat","quiet-white-cat"
         };
-    unsigned rnd_state = 123456789u; // 固定种子，避免 COW 触发在 .bss
+    unsigned rnd_state = 123456789u; // 固定种子
         for (int i = 0; i < PRODUCE_N; i++) {
             sem_wait(sem_empty);
             sem_wait(sem_mtx);
@@ -141,8 +139,8 @@ static void test_ipc_pipe_client_server(void)
             for (int i = 0; s[i]; i++) {
                 ch = s[i];
                 write(fds[1], &ch, 1);
-                // 逐字节延迟，模拟链路抖动
-                sleep(10);
+
+                sleep(3);
             }
             ch = '\n';
             write(fds[1], &ch, 1);
